@@ -5,22 +5,24 @@
 
 Cli tool for multi-layer and multi-dimension infrastructures management.
 
-
 ## Features:
-- [Terraform Units management](.github/docs/tf.md) with different dimensions from single inventory
-- [Inventory management with CLI](.github/docs/im.md) using MongoDB or File (read-only) storage types
-- [API inventory management](.github/docs/api.md) using MongoDB storage (read-only)
-- [Unit's deployment logging](.github/docs/dlog.md) using separate MongoDB storage
+- [Units management](.github/docs/unit.md): the same IaC code module (tf, otf, bash, etc.) runs with different dimensions values
+- [Inventory management](.github/docs/im.md): manage your inventory content with CLI commands
+- [Runners plugins](.github/docs/runners.md): run your units with different runners (local, docker, etc.)
+- [Inventory API server](.github/docs/api.md): using MongoDB storage (read-only)
+- [Unit's deployment logging](.github/docs/dlog.md): log, view and monitor your deployments (BOM)
 - support of local files and/or DB storage for dimension's inventory persistence
 - docker image for live API service
+- GH action for units runs in CI pipelines (WIP)
 
-Cubtera could be configured with [config file](.github/docs/config.md) or with [environment variables](.github/docs/config.md#environment-variables).
+Cubtera CLI could be configured with [config file](.github/docs/config.md) or with [environment variables](.github/docs/config.md#environment-variables).
 
 ## How it works
 
-Cubtera is a tool for managing terraform units with different dimensions from single inventory. It allows you to separate your infrastructure into different dimensions, and manage it with single inventory.
+Cubtera is a tool for managing IaC units with different dimensions from single inventory. It allows you to separate your infrastructure by different dimensions, and manage it with single inventory without code duplication (DRY).
 
-Each unit is a separate terraform code, which could be applied with defined set of dimensions. Dimensions are a set of values, which could be used for infrastructure separation.
+Each unit is a separate bunch of code for chosen type of runner, such as terraform or bash script, which could be applied with defined set of dimensions. 
+Dedicated dimension is a set of values, which could be used for infrastructure separation by different environments, regions, accounts, etc.
 
 For example, you have a unit `aws_network_vpc` which is creating vpc network for your infrastructure, and you want to use it for different environments, like staging and production. You can create dimension, `dc` (data center), and inside this dimension folder create two files `staging.json` and `production.json` with the same set of variables, but with different values. 
 production.json
@@ -39,11 +41,11 @@ staging.json
   "availability_zones": ["us-east-1a", "us-east-1b"]
 }
 ```
-And use this dimension to create vpc network for your staging and production environments, with the same unit, but with different values for variables. 
+And use this dimension to create vpc network for your staging and production environments, with the same terraform unit, but with different values for variables. 
 ```bash
-cubtera tf -d dc:production -u aws_network_vpc -- init
-cubtera tf -d dc:production -u aws_network_vpc -- plan
-cubtera tf -d dc:production -u aws_network_vpc -- apply
+cubtera run -d dc:production -u aws_network_vpc -- init
+cubtera run -d dc:production -u aws_network_vpc -- plan
+cubtera run -d dc:production -u aws_network_vpc -- apply
 ```
 Your vpc network will be created in production environment with values from `production.json` file. Defined values will be provided to terraform unit as variables:
 - `var.dim_dc_meta` - object from `production.json` file
@@ -58,8 +60,12 @@ Unit manifest file should contain following fields:
 - `optDims` - optional dimensions which could be used to apply this unit (optional)
 - `allowList` - allowed dimensions which could be used to apply this unit (optional)
 - `denyList` - denied dimensions which could not be used to apply this unit (optional)
+- `type` - unit type, which will define which runner be used to run this unit (required). Currently supported types are `tf` and `bash`.
+- `runner` - runner settings section (optional):
+  - `runner.bin_path` - path to runner script or binary, which will be used to run this unit (optional). If not set, will be used default runner for this type.
+  - `runner.version` - version of runner, which will be used to run this unit (optional). If not set, will be used `latest` version of runner for this type or default version from config.
+  - 
 - `spec` - unit specification:
-  - `spec.tfVersion` - terraform version which will be used to apply this unit (required)
   - `spec.envVars` - environment variables which will be used to apply this unit (optional)
     - `spec.envVars.optional` - optional environment variables which could be used to apply this unit
     - `spec.envVars.required` - required environment variables which are required to apply this unit
