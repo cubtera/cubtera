@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/cubtera/cubtera/compare/v0.1.0...v0.1.1) (2024-09-12)
+
+
+### Bug Fixes
+
+* **ci:** update gh action version ([67044db](https://github.com/cubtera/cubtera/commit/67044dba3c29975a37e846a01a095aae399f432c))
+
 ## 4.0.1 (2024-09-12)
 
 
