@@ -2,7 +2,7 @@ on:
   workflow_dispatch:
   push:
       branches:
-      - action-test
+      - action-check
 
 permissions:
   contents: write
