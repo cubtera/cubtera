@@ -62,15 +62,15 @@ jobs:
             asset_name: cubtera-darwin-aarch64
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Pre-build ${{ matrix.name }}
-        if: ${{ matrix.name == 'linux' }}
-        run: |
-          sudo apt update
-          sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
-          sudo update-ca-certificates
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          export PATH=$PATH:$HOME/.cargo/bin
+#      - uses: actions/checkout@v4
+#      - name: Pre-build ${{ matrix.name }}
+#        if: ${{ matrix.name == 'linux' }}
+#        run: |
+#          sudo apt update
+#          sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
+#          sudo update-ca-certificates
+#          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+#          export PATH=$PATH:$HOME/.cargo/bin
           
 
 #      - name: Build ${{ matrix.name }}
@@ -114,12 +114,23 @@ jobs:
 
       - name: Trigger formula update
         run: |
+          cat << EOF > payload.json
+          {
+            "event_type": "update_formula",
+            "client_payload": {
+              "version": "test_version",
+              "zip_sha": "123",
+              "tar_sha": "456"
+            }
+          }
+          EOF
+          
           gh api \
           --method POST \
           -H "Accept: application/vnd.github.v3+json" \
           /repos/cubtera/homebrew-cubtera/dispatches \
-          -f event_type='update_formula' \
-          -f client_payload='{"version":"test_version","zip_sha":"123","tar_sha":"456"}'
+          --input payload.json
+
         env:
           GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
