@@ -73,15 +73,15 @@ jobs:
           export PATH=$PATH:$HOME/.cargo/bin
           
 
-      - name: Build ${{ matrix.name }}
-        run: |
-          rustup target add ${{ matrix.target }}
-          cargo build --release --all --target ${{ matrix.target }}
-
-      - name: Archive ${{ matrix.name }}
-        run: |
-          zip -j ${{ matrix.asset_name }}.zip target/${{ matrix.target }}/release/cubtera
-          tar -cjf ${{ matrix.asset_name }}.tar.gz -C target/${{ matrix.target }}/release .
+#      - name: Build ${{ matrix.name }}
+#        run: |
+#          rustup target add ${{ matrix.target }}
+#          cargo build --release --all --target ${{ matrix.target }}
+#
+#      - name: Archive ${{ matrix.name }}
+#        run: |
+#          zip -j ${{ matrix.asset_name }}.zip target/${{ matrix.target }}/release/cubtera
+#          tar -cjf ${{ matrix.asset_name }}.tar.gz -C target/${{ matrix.target }}/release .
           
 #      - name: Upload ${{ matrix.name }} binary to release
 #        run: |
@@ -95,35 +95,31 @@ jobs:
 #        env:
 #          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload binary as artifact
-        uses: actions/upload-artifact@v4
-        if: ${{ matrix.name == 'linux' }}
-        with:
-          name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/cubtera
-          retention-days: 1
+#      - name: Upload binary as artifact
+#        uses: actions/upload-artifact@v4
+#        if: ${{ matrix.name == 'linux' }}
+#        with:
+#          name: ${{ matrix.asset_name }}
+#          path: target/${{ matrix.target }}/release/cubtera
+#          retention-days: 1
 
-      - name: Calculate SHA256
-        id: calculate_sha
-        run: |
-          SHA256_ZIP=$(shasum -a 256 cubtera-darwin-aarch64.zip | cut -d ' ' -f 1)
-          SHA256_TAR=$(shasum -a 256 cubtera-darwin-aarch64.tar.gz | cut -d ' ' -f 1)
-
-          echo "SHA256_ZIP=$SHA256_ZIP" >> $GITHUB_OUTPUT
-          echo "SHA256_TAR=$SHA256_TAR" >> $GITHUB_OUTPUT
+#      - name: Calculate SHA256
+#        id: calculate_sha
+#        run: |
+#          SHA256_ZIP=$(shasum -a 256 cubtera-darwin-aarch64.zip | cut -d ' ' -f 1)
+#          SHA256_TAR=$(shasum -a 256 cubtera-darwin-aarch64.tar.gz | cut -d ' ' -f 1)
+#
+#          echo "SHA256_ZIP=$SHA256_ZIP" >> $GITHUB_OUTPUT
+#          echo "SHA256_TAR=$SHA256_TAR" >> $GITHUB_OUTPUT
 
       - name: Trigger formula update
         run: |
           gh api \
-            --method POST \
-            -H "Accept: application/vnd.github.v3+json" \
-            /repos/cubtera/homebrew-cubtera/dispatches \
-            -f event_type='update_formula' \
-            -f client_payload='{
-              "version": "test_version",
-              "zip_sha": "${{ steps.calculate_sha.outputs.SHA256_ZIP }}",
-              "tar_sha": "${{ steps.calculate_sha.outputs.SHA256_TAR }}"
-            }'
+          --method POST \
+          -H "Accept: application/vnd.github.v3+json" \
+          /repos/cubtera/homebrew-cubtera/dispatches \
+          -f event_type='update_formula' \
+          -f client_payload='{"version":"test_version","zip_sha":"123","tar_sha":"456"}'
         env:
           GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
