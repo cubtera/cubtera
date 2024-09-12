@@ -46,10 +46,10 @@ jobs:
             target: x86_64-unknown-linux-musl
             asset_name: cubtera-linux-intel
 
-          - name: linux-arm64
-            os: ubuntu-22.04
-            target: aarch64-unknown-linux-musl
-            asset_name: cubtera-linux-arm64
+#          - name: linux-arm64
+#            os: ubuntu-22.04
+#            target: aarch64-unknown-linux-musl
+#            asset_name: cubtera-linux-arm64
 
           - name: macos
             os: macos-13
@@ -71,11 +71,11 @@ jobs:
           sudo update-ca-certificates
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           export PATH=$PATH:$HOME/.cargo/bin
-          rustup target add aarch64-linux-musl-gcc
-          rustup target add ${{ matrix.target }}
+          
 
       - name: Build ${{ matrix.name }}
         run: |
+          rustup target add ${{ matrix.target }}
           cargo build --release --all --target ${{ matrix.target }}
 
       - name: Archive ${{ matrix.name }}
