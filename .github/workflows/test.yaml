@@ -32,7 +32,7 @@ jobs:
     name: Build and release #for ${{ matrix.name }}
 #    needs: release
 #    if: ${{ needs.release.outputs.release_created }}
-    runs-on: ubuntu #${{ matrix.os }}
+    runs-on: ubuntu-22.04 #${{ matrix.os }}
 #    strategy:
 #      matrix:
 #        name: [
