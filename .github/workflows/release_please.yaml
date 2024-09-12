@@ -43,17 +43,22 @@ jobs:
           - name: linux
             os: ubuntu-22.04
             target: x86_64-unknown-linux-musl
-            asset_name: cubtera
+            asset_name: cubtera-linux-intel
+
+          - name: linux-arm64
+            os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            asset_name: cubtera-linux-arm64
 
           - name: macos
             os: macos-13
             target: x86_64-apple-darwin
-            asset_name: cubtera-mac-intel
+            asset_name: cubtera-darwin-intel
 
           - name: macos-arm64
             os: macos-13
             target: aarch64-apple-darwin
-            asset_name: cubtera-mac-aarch64
+            asset_name: cubtera-darwin-aarch64
             
 
     steps:
@@ -75,12 +80,17 @@ jobs:
       - name: Archive ${{ matrix.name }}
         run: |
           zip -j ${{ matrix.asset_name }}.zip target/${{ matrix.target }}/release/cubtera
-          tar -czf ${{ matrix.asset_name }}.tar.gz target/${{ matrix.target }}/release/cubtera
+          tar -cjf ${{ matrix.asset_name }}.tar.gz -C target/${{ matrix.target }}/release .
           
       - name: Upload ${{ matrix.name }} binary to release
         run: |
-          gh release upload ${{ needs.release.outputs.tag_name }} ${{ matrix.asset_name }}.zip --clobber
-          gh release upload ${{ needs.release.outputs.tag_name }} ${{ matrix.asset_name }}.tar.gz --clobber
+          SHA256_ZIP=$(shasum -a 256 ${{ matrix.asset_name }}.zip | cut -d ' ' -f 1)
+          echo "$SHA256_ZIP ${{ matrix.asset_name }}.zip" > ${{ matrix.asset_name }}.zip.sha256
+          SHA256_TAR=$(shasum -a 256 ${{ matrix.asset_name }}.tar.gz | cut -d ' ' -f 1)
+          echo "$SHA256_TAR ${{ matrix.asset_name }}.tar.gz" > ${{ matrix.asset_name }}.tar.gz.sha256
+          
+          gh release upload ${{ needs.release.outputs.tag_name }} ${{ matrix.asset_name }}.zip ${{ matrix.asset_name }}.zip.sha256 --clobber
+          gh release upload ${{ needs.release.outputs.tag_name }} ${{ matrix.asset_name }}.tar.gz ${{ matrix.asset_name }}.tar.gz --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -138,3 +148,27 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             from_image=scratch
+      
+      - name: Calculate SHA256
+        id: calculate_sha
+        run: |
+          SHA256_ZIP=$(shasum -a 256 cubtera-darwin-aarch64.zip | cut -d ' ' -f 1)
+          SHA256_TAR=$(shasum -a 256 cubtera-darwin-aarch64.tar.gz | cut -d ' ' -f 1)
+          
+          echo "SHA256_ZIP=$SHA256_ZIP" >> $GITHUB_OUTPUT
+          echo "SHA256_TAR=$SHA256_TAR" >> $GITHUB_OUTPUT
+
+      - name: Trigger formula update
+        run: |
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            /repos/cubtera/homebrew-cubtera/dispatches \
+            -f event_type='update_formula' \
+            -f client_payload='{
+              "version": "${{ steps.get-tag.outputs.tag_name }}",
+              "zip_sha": "${{ steps.calculate_sha.outputs.SHA256_ZIP }}",
+              "tar_sha": "${{ steps.calculate_sha.outputs.SHA256_TAR }}"
+            }'
+        env:
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
