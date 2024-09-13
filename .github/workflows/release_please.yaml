@@ -70,7 +70,7 @@ jobs:
             target/
           key: ${{ matrix.name }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Pre-build ${{ matrix.name }}
+      - name: Pre-build install ${{ matrix.name }}
         if: ${{ matrix.name == 'linux' }}
         run: |
           sudo apt update
