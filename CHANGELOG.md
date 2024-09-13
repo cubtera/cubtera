@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/cubtera/cubtera/compare/v1.0.0...v1.0.1) (2024-09-13)
+
+
+### Bug Fixes
+
+* github action ([f054448](https://github.com/cubtera/cubtera/commit/f05444815150169a0a87830ead74ffb0d7fc7581))
+
 ## [1.0.0](https://github.com/cubtera/cubtera/compare/v0.1.2...v1.0.0) (2024-09-13)
 
 
