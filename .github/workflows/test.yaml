@@ -62,21 +62,33 @@ jobs:
 #            asset_name: cubtera-darwin-aarch64
 
     steps:
-#      - uses: actions/checkout@v4
-#      - name: Pre-build ${{ matrix.name }}
-#        if: ${{ matrix.name == 'linux' }}
-#        run: |
-#          sudo apt update
-#          sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
-#          sudo update-ca-certificates
-#          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-#          export PATH=$PATH:$HOME/.cargo/bin
+      - uses: actions/checkout@v4
+      - name: Rust cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Pre-build #${{ matrix.name }}
+        #if: ${{ matrix.name == 'linux' }}
+        run: |
+          sudo apt update
+          sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
+          sudo update-ca-certificates
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          export PATH=$PATH:$HOME/.cargo/bin
           
 
-#      - name: Build ${{ matrix.name }}
-#        run: |
-#          rustup target add ${{ matrix.target }}
-#          cargo build --release --all --target ${{ matrix.target }}
+      - name: Build # ${{ matrix.name }}
+        run: |
+          rustup target add ${{ matrix.target }}
+          cargo build --release --all --target aarch64-unknown-linux-gnu 
+
+#          ${{ matrix.target }}
 #
 #      - name: Archive ${{ matrix.name }}
 #        run: |
@@ -112,27 +124,27 @@ jobs:
 #          echo "SHA256_ZIP=$SHA256_ZIP" >> $GITHUB_OUTPUT
 #          echo "SHA256_TAR=$SHA256_TAR" >> $GITHUB_OUTPUT
 
-      - name: Trigger formula update
-        run: |
-          cat << EOF > payload.json
-          {
-            "event_type": "update_formula",
-            "client_payload": {
-              "version": "0.1.0",
-              "zip_sha": "13489577483756839275683756837456",
-              "tar_sha": "35387598237095870932875098375092"
-            }
-          }
-          EOF
-          
-          gh api \
-          --method POST \
-          -H "Accept: application/vnd.github.v3+json" \
-          /repos/cubtera/homebrew-cubtera/dispatches \
-          --input payload.json
-
-        env:
-          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+#      - name: Trigger formula update
+#        run: |
+#          cat << EOF > payload.json
+#          {
+#            "event_type": "update_formula",
+#            "client_payload": {
+#              "version": "0.1.0",
+#              "zip_sha": "13489577483756839275683756837456",
+#              "tar_sha": "35387598237095870932875098375092"
+#            }
+#          }
+#          EOF
+#
+#          gh api \
+#          --method POST \
+#          -H "Accept: application/vnd.github.v3+json" \
+#          /repos/cubtera/homebrew-cubtera/dispatches \
+#          --input payload.json
+#
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
 #  publish_docker:
 #    name: Publish docker image
