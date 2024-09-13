@@ -1,5 +1,6 @@
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](.github/CODE_OF_CONDUCT.md)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Cubtera version release](https://github.com/cubtera/cubtera/actions/workflows/release_please.yaml/badge.svg?branch=main)](https://github.com/cubtera/cubtera/actions/workflows/release_please.yaml)
 # Cubtera
 ## Multi-dimensional infrastructure manager
 
