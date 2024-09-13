@@ -45,11 +45,6 @@ jobs:
             target: x86_64-unknown-linux-musl
             asset_name: cubtera-linux-intel
 
-          - name: linux-arm64
-            os: ubuntu-22.04
-            target: aarch64-unknown-linux-musl
-            asset_name: cubtera-linux-arm64
-
           - name: macos
             os: macos-13
             target: x86_64-apple-darwin
@@ -63,6 +58,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.name }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
       - name: Pre-build ${{ matrix.name }}
         if: ${{ matrix.name == 'linux' }}
         run: |
@@ -101,6 +108,41 @@ jobs:
           name: ${{ matrix.asset_name }}
           path: target/${{ matrix.target }}/release/cubtera
           retention-days: 1
+
+      - name: Calculate SHA256
+        id: calculate_sha
+        run: |
+          MAC_AARCH64_SHA256_ZIP=$(shasum -a 256 cubtera-darwin-aarch64.zip | cut -d ' ' -f 1)
+          MAC_INTEL_SHA256_ZIP=$(shasum -a 256 cubtera-darwin-intel.zip | cut -d ' ' -f 1)
+          LINUX_INTEL_SHA256_ZIP=$(shasum -a 256 cubtera-linux-intel.zip | cut -d ' ' -f 1)
+
+          echo "MAC_AARCH64_SHA256_ZIP=MAC_AARCH64_SHA256_ZIP" >> $GITHUB_OUTPUT
+          echo "MAC_INTEL_SHA256_ZIP=MAC_INTEL_SHA256_ZIP" >> $GITHUB_OUTPUT
+          echo "LINUX_INTEL_SHA256_ZIP=LINUX_INTEL_SHA256_ZIP" >> $GITHUB_OUTPUT
+
+      - name: Trigger formula update
+        run: |
+          VERSION=$(grep version Cargo.toml | awk -F '"' '{ print $2 }' | head -1)
+          cat << EOF > payload.json
+          {
+            "event_type": "update_formula",
+            "client_payload": {
+              "version": $VERSION,
+              "mac_intel_zip_sha": "${{ steps.calculate_sha.outputs.MAC_INTEL_SHA256_ZIP }}",
+              "mac_aarch_zip_sha": "${{ steps.calculate_sha.outputs.MAC_AARCH64_SHA256_ZIP }}",
+              "linux_intel_zip_sha": "${{ steps.calculate_sha.outputs.LINUX_INTEL_SHA256_ZIP }}"
+            }
+          }
+          EOF
+
+          gh api \
+          --method POST \
+          -H "Accept: application/vnd.github.v3+json" \
+          /repos/cubtera/homebrew-cubtera/dispatches \
+          --input payload.json
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
   publish_docker:
     name: Publish docker image
@@ -148,27 +190,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             from_image=scratch
-      
-      - name: Calculate SHA256
-        id: calculate_sha
-        run: |
-          SHA256_ZIP=$(shasum -a 256 cubtera-darwin-aarch64.zip | cut -d ' ' -f 1)
-          SHA256_TAR=$(shasum -a 256 cubtera-darwin-aarch64.tar.gz | cut -d ' ' -f 1)
-          
-          echo "SHA256_ZIP=$SHA256_ZIP" >> $GITHUB_OUTPUT
-          echo "SHA256_TAR=$SHA256_TAR" >> $GITHUB_OUTPUT
-
-      - name: Trigger formula update
-        run: |
-          gh api \
-            --method POST \
-            -H "Accept: application/vnd.github.v3+json" \
-            /repos/cubtera/homebrew-cubtera/dispatches \
-            -f event_type='update_formula' \
-            -f client_payload='{
-              "version": "${{ steps.get-tag.outputs.tag_name }}",
-              "zip_sha": "${{ steps.calculate_sha.outputs.SHA256_ZIP }}",
-              "tar_sha": "${{ steps.calculate_sha.outputs.SHA256_TAR }}"
-            }'
-        env:
-          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
