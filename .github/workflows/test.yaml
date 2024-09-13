@@ -72,7 +72,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
       - name: Pre-build #${{ matrix.name }}
         #if: ${{ matrix.name == 'linux' }}
         run: |
@@ -85,6 +85,7 @@ jobs:
 
       - name: Build # ${{ matrix.name }}
         run: |
+          sudo apt-get install gcc-aarch64-linux-gnu
           rustup target add aarch64-unknown-linux-gnu
           cargo build --release --all --target aarch64-unknown-linux-gnu 
 
