@@ -130,6 +130,8 @@ jobs:
             }
           }
           EOF
+          
+          cat payload.json
 
           gh api \
           --method POST \
