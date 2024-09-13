@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/cubtera/cubtera/compare/v1.0.1...v1.0.2) (2024-09-13)
+
+
+### Miscellaneous Chores
+
+* release 1.0.2 ([0ccb9b3](https://github.com/cubtera/cubtera/commit/0ccb9b301faa257cf40d572b201a73c5e0473897))
+
 ## [1.0.1](https://github.com/cubtera/cubtera/compare/v1.0.0...v1.0.1) (2024-09-13)
 
 
