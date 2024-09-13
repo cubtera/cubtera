@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/cubtera/cubtera/compare/v0.1.1...v0.1.2) (2024-09-13)
+
+
+### Bug Fixes
+
+* **ci:** add github action logic for hombrew distribution ([aca57aa](https://github.com/cubtera/cubtera/commit/aca57aaf499edb841cd032b1290883d1bb185012))
+
 ## 4.0.0 (2024-09-12)
 
 
