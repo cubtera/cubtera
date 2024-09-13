@@ -86,7 +86,7 @@ jobs:
       - name: Build # ${{ matrix.name }}
         run: |
           rustup target add ${{ matrix.target }}
-          cargo build --release --all --target aarch64-unknown-linux-gnu 
+          cargo build --release --all --target x86_64-unknown-linux-musl 
 
 #          ${{ matrix.target }}
 #
