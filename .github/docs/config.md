@@ -2,7 +2,7 @@
 
 ## Configuration file
 
-Cubtera configuration file is a toml file, which should be placed by default path `~/.cubtera/config.toml`. This file contains all cubtera configuration parameters, which could be used to configure cubtera behavior. If you want to use custom configuration file, you can set it with environment variable `CUBTERA_CONFIG`.
+Cubtera configuration file is a `config.toml` file, which should be placed by default path `~/.cubtera/config.toml`. This file contains all cubtera configuration parameters, which could be used to configure cubtera behavior. If you want to use custom configuration file, you can set it with environment variable `CUBTERA_CONFIG`.
 
 ### Inventory and terraform folders parameters:
 - `workspace_path` - path to your workspace, where all your terraform states will be stored, default is `~/.cubtera/workspace`
