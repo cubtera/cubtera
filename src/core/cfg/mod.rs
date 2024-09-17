@@ -124,18 +124,6 @@ impl CubteraConfig {
 }
 
 impl CubteraConfig {
-    // pub fn db_connect(db: &str) -> mongodb::sync::Client {
-    //     let options = match mongodb::options::ClientOptions::parse(db) {
-    //         Ok(client) => client,
-    //         Err(e) => exit_with_error(format!("DB connection error: {e}")),
-    //     };
-    //     let client = mongodb::sync::Client::with_options(options);
-    //     match client {
-    //         Ok(client) => client,
-    //         Err(e) => exit_with_error(format!("DB connection error: {e}")),
-    //     }
-    // }
-
     pub fn build(self) -> Self {
         // read all CUBTERA_* env vars overrides
         let cfg_env_vars = config::Config::builder()
