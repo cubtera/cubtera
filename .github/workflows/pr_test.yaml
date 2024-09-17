@@ -17,7 +17,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Pre-build install ${{ matrix.name }}
-        if: ${{ matrix.name == 'linux' }}
         run: |
           sudo apt update
           sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
