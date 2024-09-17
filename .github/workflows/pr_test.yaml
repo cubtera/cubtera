@@ -1,0 +1,46 @@
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+    contents: write
+    pull-requests: write
+
+name: Cubtera PR test
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pre-build install ${{ matrix.name }}
+        if: ${{ matrix.name == 'linux' }}
+        run: |
+          sudo apt update
+          sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
+          sudo update-ca-certificates
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          export PATH=$PATH:$HOME/.cargo/bin
+
+      - name: Generate Cargo.lock and set target toolchain
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo generate-lockfile
+
+#      - name: Rust cache
+#        uses: actions/cache@v4
+#        with:
+#          path: |
+#            ~/.cargo/bin/
+#            ~/.cargo/registry/index/
+#            ~/.cargo/registry/cache/
+#            ~/.cargo/git/db/
+#            target/
+#          key: ${{ matrix.name }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build and test
+        run: |
+          cargo test --target x86_64-unknown-linux-musl
