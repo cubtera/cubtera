@@ -6,17 +6,25 @@
 
 Cli tool for multi-layer and multi-dimension infrastructures management.
 
-## Features:
+### Install
+MacOS and Linux:
+```bash
+brew tap cubtera/cubtera
+brew install cubtera
+```
+or download binary from [releases](https://ginhub.com/cubtera/cubtera/releases) and put it to your PATH.
+
+Configure cli with [config file](.github/docs/config.md) or with [environment variables](.github/docs/config.md#environment-variables).
+
+### Features
 - [Units management](.github/docs/unit.md): the same IaC code module (tf, otf, bash, etc.) runs with different dimensions values
 - [Inventory management](.github/docs/im.md): manage your inventory content with CLI commands
-- [Runners plugins](.github/docs/runners.md): run your units with different runners (local, docker, etc.)
+- [Runners plugins](.github/docs/runners.md): run your units with different runners (terraform, bash, etc.)
 - [Inventory API server](.github/docs/api.md): using MongoDB storage (read-only)
 - [Unit's deployment logging](.github/docs/dlog.md): log, view and monitor your deployments (BOM)
 - support of local files and/or DB storage for dimension's inventory persistence
 - docker image for live API service
 - GH action for units runs in CI pipelines (WIP)
-
-Cubtera CLI could be configured with [config file](.github/docs/config.md) or with [environment variables](.github/docs/config.md#environment-variables).
 
 ## How it works
 
