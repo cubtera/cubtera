@@ -38,7 +38,6 @@ type CliExecutor = fn(subcommand: &ArgMatches, storage: &Storage) -> ();
 
 #[allow(clippy::unnecessary_wraps)]
 pub fn get_args() -> CliResult<Cli> {
-    // dbg!(&CFG.clone());
     let matches = get_matches(); // Take arguments from CLI
 
     // STORAGE TYPE: if CUBTERA_DB env var is set -> DB, else -> FS
