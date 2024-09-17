@@ -58,6 +58,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Pre-build install ${{ matrix.name }}
+        if: ${{ matrix.name == 'linux' }}
+        run: |
+          sudo apt update
+          sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
+          sudo update-ca-certificates
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          export PATH=$PATH:$HOME/.cargo/bin
+
+      - name: Generate Cargo.lock and set target toolchain
+        run: |
+          rustup target add ${{ matrix.target }}
+          cargo generate-lockfile
 
       - name: Rust cache
         uses: actions/cache@v4
@@ -70,18 +83,8 @@ jobs:
             target/
           key: ${{ matrix.name }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Pre-build install ${{ matrix.name }}
-        if: ${{ matrix.name == 'linux' }}
-        run: |
-          sudo apt update
-          sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
-          sudo update-ca-certificates
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          export PATH=$PATH:$HOME/.cargo/bin
-
       - name: Build ${{ matrix.name }}
         run: |
-          rustup target add ${{ matrix.target }}
           cargo build --release --all --target ${{ matrix.target }}
 
       - name: Archive ${{ matrix.name }}
