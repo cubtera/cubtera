@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.4](https://github.com/cubtera/cubtera/compare/v1.0.3...v1.0.4) (2024-09-18)
+
+
+### Bug Fixes
+
+* add pr test action ([7801e7c](https://github.com/cubtera/cubtera/commit/7801e7cda522f118f3f0aced913a28d47bc9191e))
+* add pr test action ([13b35cf](https://github.com/cubtera/cubtera/commit/13b35cf046ad19ba23ab77b422eb8ffb60fc2152))
+* build action ([040ec89](https://github.com/cubtera/cubtera/commit/040ec89a8432ab7a1317341ebe57b2d8aa3020c2))
+* test action ([d4796c9](https://github.com/cubtera/cubtera/commit/d4796c9c4e1ecbf1953285e15e89878fea8de8e8))
+* test pr action ([720407f](https://github.com/cubtera/cubtera/commit/720407fd6adf82ee0dc5bf7a84a48c6f31e35f06))
+
 ## [1.0.3](https://github.com/cubtera/cubtera/compare/v1.0.2...v1.0.3) (2024-09-17)
 
 
