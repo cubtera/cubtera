@@ -195,9 +195,8 @@ pub fn if_intersect(vec1: Vec<String>, vec2: Vec<String>) -> bool {
 }
 
 pub fn value_intersection(value1: Value, value2: Value) -> Option<HashSet<String>> {
-    let vec1: Option<Vec<String>> = value1.as_array()?.iter().map(|v| v.as_str().map(|s| s.to_string())).collect();
-    let vec2: Option<Vec<String>> = value2.as_array()?.iter().map(|v| v.as_str().map(|s| s.to_string())).collect();
-
+    let vec1 = value_to_vec(&value1);
+    let vec2 = value_to_vec(&value2);
     let set1: HashSet<_> = vec1?.into_iter().collect();
     let set2: HashSet<_> = vec2?.into_iter().collect();
 
@@ -205,7 +204,10 @@ pub fn value_intersection(value1: Value, value2: Value) -> Option<HashSet<String
         set if set.is_empty() => None,
         set => Some(set),
     }
-    //Some(set1.intersection(&set2).cloned().collect())
+}
+
+fn value_to_vec(value: &Value) -> Option<Vec<String>> {
+    value.as_array()?.iter().map(|v| v.as_str().map(|s| s.to_string())).collect()
 }
 
 pub fn group_tuples(tuples: Vec<(String, String)>) -> HashMap<String, Vec<String>> {
@@ -502,3 +504,4 @@ mod tests {
         assert_eq!(target, expected_result);
     }
 }
+
