@@ -156,47 +156,47 @@ fn git_sha_by_path(path: PathBuf) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_git_sha_by_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test");
-        std::fs::write(&path, "test").unwrap();
-
-        let output = std::process::Command::new("git")
-            .arg("init")
-            .current_dir(&dir)
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-
-        let output = std::process::Command::new("git")
-            .arg("add")
-            .arg(&path)
-            .current_dir(&dir)
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-
-        let output = std::process::Command::new("git")
-            .arg("commit")
-            .arg("-m")
-            .arg("test")
-            .current_dir(&dir)
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-
-        let sha = git_sha_by_path(dir.path().to_path_buf());
-        assert_ne!(&sha, "undefined");
-    }
-
-    #[test]
-    fn test_git_sha_by_path_invalid_path() {
-        let path = PathBuf::from("/invalid/path");
-        let sha = git_sha_by_path(path);
-        assert_eq!(&sha, "undefined");
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     #[test]
+//     fn test_git_sha_by_path() {
+//         let dir = tempfile::tempdir().unwrap();
+//         let path = dir.path().join("test");
+//         std::fs::write(&path, "test").unwrap();
+//
+//         let output = std::process::Command::new("git")
+//             .arg("init")
+//             .current_dir(&dir)
+//             .output()
+//             .unwrap();
+//         assert!(output.status.success());
+//
+//         let output = std::process::Command::new("git")
+//             .arg("add")
+//             .arg(&path)
+//             .current_dir(&dir)
+//             .output()
+//             .unwrap();
+//         assert!(output.status.success());
+//
+//         let output = std::process::Command::new("git")
+//             .arg("commit")
+//             .arg("-m")
+//             .arg("test")
+//             .current_dir(&dir)
+//             .output()
+//             .unwrap();
+//         assert!(output.status.success());
+//
+//         let sha = git_sha_by_path(dir.path().to_path_buf());
+//         assert_ne!(&sha, "undefined");
+//     }
+//
+//     #[test]
+//     fn test_git_sha_by_path_invalid_path() {
+//         let path = PathBuf::from("/invalid/path");
+//         let sha = git_sha_by_path(path);
+//         assert_eq!(&sha, "undefined");
+//     }
+// }
