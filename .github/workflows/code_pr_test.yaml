@@ -2,12 +2,16 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
 
 permissions:
     contents: write
     pull-requests: write
 
-name: Cubtera PR test
+name: Code changes test
 jobs:
   build:
     name: Build and test
@@ -16,17 +20,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pre-build install ${{ matrix.name }}
+      - name: Pre-build install dependencies
         run: |
           sudo apt update
           sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
           sudo update-ca-certificates
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           export PATH=$PATH:$HOME/.cargo/bin
-
-      - name: Generate Cargo.lock and set target toolchain
-        run: |
           rustup target add x86_64-unknown-linux-musl
+
+      - name: Generate Cargo.lock
+        run: |
           cargo generate-lockfile
 
 #      - name: Rust cache
@@ -38,7 +42,7 @@ jobs:
 #            ~/.cargo/registry/cache/
 #            ~/.cargo/git/db/
 #            target/
-#          key: ${{ matrix.name }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+#          key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build and test
         run: |
