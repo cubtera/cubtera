@@ -156,12 +156,12 @@ jobs:
 
       - name: Trigger Homebrew formula update
         run: |
-          BASE_URL="https://github.com/cubtera/cubtera/releases/download/v${VERSION}" 
           VERSION=$(grep version Cargo.toml | awk -F '"' '{ print $2 }' | head -1)
+          BASE_URL="https://github.com/cubtera/cubtera/releases/download/v${VERSION}" 
           LINUX_INTEL_SHA256_ZIP=$(curl -sL $BASE_URL/cubtera-linux-intel.zip | shasum -a 256 | cut -d ' ' -f 1)
           MAC_INTEL_SHA256_ZIP=$(curl -sL $BASE_URL/cubtera-darwin-intel.zip | shasum -a 256 | cut -d ' ' -f 1)
           MAC_AARCH64_SHA256_ZIP=$(curl -sL $BASE_URL/cubtera-darwin-aarch64.zip | shasum -a 256 | cut -d ' ' -f 1)
-          
+
           cat << EOF > payload.json
           {
             "event_type": "update_formula",
