@@ -22,7 +22,9 @@ pub struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec: Option<Spec>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runner: Option<HashMap<String, String>>
+    pub runner: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<HashMap<String, String>>
 }
 
 impl Manifest {

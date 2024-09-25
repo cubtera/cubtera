@@ -398,13 +398,14 @@ fn copy_files_from_manifest(
     f: impl Fn(String),
 ) {
     for (src, dst) in files {
-        if PathBuf::new().join(&src).exists() {
+        let src_path = string_to_path(&src);
+        if PathBuf::new().join(&src_path).exists() {
             let dest = unit_folder.join(dst);
             if !dest.exists() {
                 std::fs::create_dir_all(dest.parent().unwrap())
                     .unwrap_or_exit(format!("Failed to create {dest:?} file"));
             }
-            std::fs::copy(&src, dest).unwrap_or_exit(format!("Failed to copy {} file", &src.red()));
+            std::fs::copy(&src_path, dest).unwrap_or_exit(format!("Failed to copy {} file", &src.red()));
         } else {
             f(src);
         }

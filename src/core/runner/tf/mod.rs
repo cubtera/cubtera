@@ -3,71 +3,88 @@ use crate::prelude::*;
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use log::{info, warn, debug};
 use rand::Rng;
 use yansi::Paint;
+use serde_json::{json, Value};
 
 mod tfswitch;
 mod params;
 
 use tfswitch::tf_switch;
 use params::TfRunnerParams;
-use super::{Runner, RunnerParams, RunnerContext};
+use super::{Runner, RunnerParams, RunnerLoad};
 
 pub struct TfRunner {
-    ctx: RunnerContext,
-    params: TfRunnerParams
+    load: RunnerLoad,
+    params: TfRunnerParams,
+    ctx: Value
 }
 
 // const LOCK_PORT: u16 = 65432;
 
 impl Runner for TfRunner {
-    fn new(ctx: RunnerContext) -> Self {
-        let params = TfRunnerParams::init(ctx.params.clone());
+    fn new(load: RunnerLoad) -> Self {
+        let params = TfRunnerParams::init(load.params.clone());
+        let ctx = Value::Object(serde_json::Map::new());
         TfRunner {
-            ctx,
-            params
+            load,
+            params,
+            ctx
         }
     }
 
-    fn init(&self) -> Result<(), Box<dyn std::error::Error>> {
-        debug!(target: "tf runner", "Initialization process");
-
-        self.copy_files()?;
-        self.change_files()?;
-
-        Ok(())
+    fn get_load(&self) -> &RunnerLoad {
+        &self.load
     }
 
-    fn copy_files(&self) -> Result<(), Box<dyn std::error::Error>> {
-        info!(target: "tf runner", "Copy files to: {}", &self.ctx.unit.temp_folder.to_string_lossy().blue());
-        if self.ctx.command.first().unwrap_or(&"".into()).as_str() == "init"  {
-            debug!(target: "tf runner", "Unit temp folder was created: \n{:?}", &self.ctx.unit.temp_folder);
-            self.ctx.unit.remove_temp_folder();
-            self.ctx.unit.copy_files();
+    fn get_ctx(&self) -> &Value {
+        &self.ctx
+    }
+
+    fn get_ctx_mut(&mut self) -> &mut Value {
+        &mut self.ctx
+    }
+
+    // fn init(&self) -> Result<(), Box<dyn std::error::Error>> {
+    //     debug!(target: "tf runner", "Initialization process");
+    //
+    //     self.copy_files()?;
+    //     self.change_files()?;
+    //
+    //     Ok(())
+    // }
+
+    fn copy_files(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        info!(target: "tf runner", "Copy files to: {}", &self.load.unit.temp_folder.to_string_lossy().blue());
+        if self.load.command.first().unwrap_or(&"".into()).as_str() == "init"  {
+            debug!(target: "tf runner", "Unit temp folder was created: \n{:?}", &self.load.unit.temp_folder);
+            self.load.unit.remove_temp_folder();
+            self.load.unit.copy_files();
+            self.create_state_backend()?;
         } else {
-            if !self.ctx.unit.temp_folder.exists() {
+            if !self.load.unit.temp_folder.exists() {
                 exit_with_error(format!(
                     "Can't find unit temp folder {:?}. Run init command first.",
-                    &self.ctx.unit.temp_folder
+                    &self.load.unit.temp_folder
                 ));
             }
             if GLOBAL_CFG.always_copy_files {
-                self.ctx.unit.copy_files();
+                self.load.unit.copy_files();
             }
         }
 
         Ok(())
     }
 
-    fn change_files(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn change_files(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         debug!(target: "tf runner", "Change dimension data files into terraform format");
 
         // read all files started with dim_ and json extension
-        let files = std::fs::read_dir(&self.ctx.unit.temp_folder)
-            .unwrap_or_exit(format!("Can't read unit temp folder: {:?}", self.ctx.unit.temp_folder))
+        let files = std::fs::read_dir(&self.load.unit.temp_folder)
+            .unwrap_or_exit(format!("Can't read unit temp folder: {:?}", self.load.unit.temp_folder))
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
             .filter(|entry| entry.is_file())
@@ -94,7 +111,7 @@ r#"variable "{}" {{
                 ))
                 .collect();
             let mut file = std::fs::File::create(
-                &self.ctx.unit.temp_folder.join("cubtera_vars.tf"))?;
+                &self.load.unit.temp_folder.join("cubtera_vars.tf"))?;
             file.write_all(dim_tf_variables.as_bytes())?;
         }
 
@@ -124,24 +141,35 @@ r#"variable "{}" {{
             std::fs::rename(file, new_file).unwrap_or_exit(format!("Can't rename file: {:?}", file));
         });
 
+
+        // // create tf backend config hcl file
+        // let tf_hcl = json!({
+        //     "terraform": {
+        //         "backend": &self.load.state_backend
+        //     }
+        // });
+        //
+        // let path = self.load.unit.temp_folder.join("cubtera_backend.tf");
+        // convert_json_to_hcl_file(&tf_hcl, path).unwrap();
+
         Ok(())
     }
 
-    fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn runner(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut tf_args: Vec<String> = Vec::new();
 
-        if let Some(command) = self.ctx.command.first() {
+        if let Some(command) = self.load.command.first() {
             match command.as_str() {
                 "init" => {
-                    tf_args.extend(self.tf_backend_conf_args());
-                    debug!(target: "tf runner", "Unit temp folder was created: \n{:?}", &self.ctx.unit.temp_folder);
+                    // tf_args.extend(self.tf_backend_conf_args());
+                    // debug!(target: "tf runner", "Unit temp folder was created: \n{:?}", &self.load.unit.temp_folder);
                 }
                 "plan" | "apply" | "destroy" | "refresh" => {
                     // check if unit temp folder is not empty
-                    if !self.ctx.unit.temp_folder.exists() {
+                    if !self.load.unit.temp_folder.exists() {
                         exit_with_error(format!(
                             "Can't find unit temp folder {:?}. Run init command first.",
-                            &self.ctx.unit.temp_folder
+                            &self.load.unit.temp_folder
                         ));
                     }
                     // extend vars with required env vars from unit manifest
@@ -153,8 +181,8 @@ r#"variable "{}" {{
 
         // TODO: Remove legacy spec after units lib is fixed and remove params var usage
         let mut params = self.params.clone();
-        if !self.ctx.unit.manifest.runner.is_some() {
-            if let Some(spec) = &self.ctx.unit.manifest.spec {
+        if !self.load.unit.manifest.runner.is_some() {
+            if let Some(spec) = &self.load.unit.manifest.spec {
                 if let Some(version) = &spec.tf_version {
                     params.version = version.clone();
                     params.bin_path = None;
@@ -182,7 +210,7 @@ r#"variable "{}" {{
 
         info!(target: "tf runner", "Command: {} {}",
             tf_path.to_string_lossy().blue(),
-            self.ctx.command.join(" ").blue(),
+            self.load.command.join(" ").blue(),
         );
 
         let filtered_env_vars: HashMap<String, String> = std::env::vars()
@@ -196,7 +224,7 @@ r#"variable "{}" {{
 
         let mut socket: Option<TcpListener> = None;
         // check if another instance is running with init and wait for it to finish
-        if matches!(&self.ctx.command.as_slice(), [cmd, ..] if cmd == "init") {
+        if matches!(&self.load.command.as_slice(), [cmd, ..] if cmd == "init") {
             let delay = rand::thread_rng().gen_range(800..1200);
 
             // while socket.is_none() {
@@ -222,13 +250,14 @@ r#"variable "{}" {{
         debug!(target: "tf runner", "Additional args: {}", &tf_args.join(" ").blue());
 
         let mut child = tf_command
-            .current_dir(self.ctx.unit.temp_folder.to_str().unwrap())
-            .args(&self.ctx.command)
+            .current_dir(self.load.unit.temp_folder.to_str().unwrap())
+            .args(&self.load.command)
             .args(tf_args)
             .envs(filtered_env_vars)
             .env("TF_VAR_org_name", &GLOBAL_CFG.org)
             .env("TF_VAR_tf_state_s3bucket", &GLOBAL_CFG.tf_state_s3bucket)
             .env("TF_VAR_tf_state_s3region", &GLOBAL_CFG.tf_state_s3region)
+            .env("TF_VAR_unit_name", &self.load.unit.name)
             .env(
                 "TF_VAR_tf_state_key_prefix",
                 &GLOBAL_CFG.tf_state_key_prefix.clone().unwrap_or_default(),
@@ -244,7 +273,7 @@ r#"variable "{}" {{
             .spawn()
             .unwrap_or_exit(format!(
                 "Failed to start {:?} with args {:?}",
-                tf_path, &self.ctx.command
+                tf_path, &self.load.command
             ));
 
         let result = child
@@ -254,14 +283,14 @@ r#"variable "{}" {{
         let exit_code = result.code().unwrap_or(1);
 
         let tf_command = GLOBAL_CFG.dlog_db.clone()
-            .and(matches!(self.ctx.command.as_slice(), [cmd, ..] if cmd == "apply")
+            .and(matches!(self.load.command.as_slice(), [cmd, ..] if cmd == "apply")
                 .then_some("apply")
-                .or(matches!(self.ctx.command.as_slice(), [cmd, ..] if cmd == "destroy")
+                .or(matches!(self.load.command.as_slice(), [cmd, ..] if cmd == "destroy")
                     .then_some("destroy")));
 
         if let Some(tf_command) = tf_command {
             let dlog = Dlog::build(
-                self.ctx.unit.clone(),
+                self.load.unit.clone(),
                 tf_command.into(),
                 exit_code,
             );
@@ -276,29 +305,49 @@ r#"variable "{}" {{
 
         if !GLOBAL_CFG.clean_cache {
             debug!(target: "tf runner", "Ignore cache cleaning due to global config");
-            std::process::exit(exit_code);
+            //std::process::exit(exit_code);
+            self.update_ctx("exit_code", json!(exit_code));
+
+            return Ok(())
         }
 
         if exit_code == 0 {
-            if let Some(first_command) = self.ctx.command.first() {
+            if let Some(first_command) = self.load.command.first() {
                 if first_command == "apply"
-                    || self.ctx.command.contains(&"--detailed-exitcode".to_owned())
+                    || self.load.command.contains(&"--detailed-exitcode".to_owned())
                 {
                     debug!(target: "tf runner", "Remove temp folder after successful {} command", "apply".blue());
-                    self.ctx.unit.remove_temp_folder();
+                    self.load.unit.remove_temp_folder();
                 }
             }
         }
 
-        std::process::exit(exit_code);
+        self.update_ctx("exit_code", json!(exit_code));
+        Ok(())
+        // std::process::exit(exit_code);
     }
 }
 
 impl TfRunner {
+
+    fn create_state_backend(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // create tf backend config hcl file
+        let tf_hcl = json!({
+            "terraform": {
+                "backend": &self.load.state_backend
+            }
+        });
+
+        let path = self.load.unit.temp_folder.join("cubtera_backend.tf");
+        convert_json_to_hcl_file(&tf_hcl, path)?;
+
+        Ok(())
+    }
+
     fn tf_vars_args(&self) -> Vec<String> {
         let mut tf_vars_args: Vec<String> = Vec::new();
         // extend vars with required env vars from unit manifest
-        if let Some(spec) = &self.ctx.unit.manifest.spec {
+        if let Some(spec) = &self.load.unit.manifest.spec {
             if let Some(env_vars) = &spec.env_vars {
                 if let Some(required) = &env_vars.required {
                     for var in required {
@@ -330,8 +379,8 @@ impl TfRunner {
         let unit_state_path = format!(
             "{}{}/{}.tfstate",
             GLOBAL_CFG.tf_state_key_prefix.clone().unwrap_or_default(),
-            self.ctx.unit.get_unit_state_path(),
-            self.ctx.unit.name
+            self.load.unit.get_unit_state_path(),
+            self.load.unit.name
         );
 
         debug!(target: "tf runner", "Unit state path: \n{:?}", unit_state_path);
@@ -358,4 +407,56 @@ impl TfRunner {
             ].to_vec()
         }
     }
+}
+
+fn json_to_hcl(json: &Value, indent: usize) -> String {
+    match json {
+        Value::Object(map) => {
+            let mut result = String::new();
+            for (key, value) in map {
+                let indentation = "  ".repeat(indent);
+                match value {
+                    Value::Object(inner_map) => {
+                        if key == "backend" && inner_map.len() == 1 {
+                            // Special handling for any backend type
+                            let (backend_type, backend_config) = inner_map.iter().next().unwrap();
+                            result.push_str(&format!("{}{}  \"{}\" {{\n", indentation, key, backend_type));
+                            result.push_str(&json_to_hcl(backend_config, indent + 1));
+                            result.push_str(&format!("{}}}\n", indentation));
+                        } else {
+                            result.push_str(&format!("{}{} {{\n", indentation, key));
+                            result.push_str(&json_to_hcl(value, indent + 1));
+                            result.push_str(&format!("{}}}\n", indentation));
+                        }
+                    }
+                    Value::Array(arr) => {
+                        result.push_str(&format!("{}{} = [\n", indentation, key));
+                        for item in arr {
+                            result.push_str(&format!("{}  {},\n", indentation, json_to_hcl(item, indent + 1).trim()));
+                        }
+                        result.push_str(&format!("{}]\n", indentation));
+                    }
+                    _ => {
+                        result.push_str(&format!("{}{} = {}\n", indentation, key, json_to_hcl(value, indent)));
+                    }
+                }
+            }
+            result
+        }
+        Value::Array(arr) => {
+            format!("[{}]", arr.iter().map(|v| json_to_hcl(v, indent)).collect::<Vec<_>>().join(", "))
+        }
+        Value::String(s) => format!("\"{}\"", s),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => "null".to_string(),
+    }
+}
+
+fn convert_json_to_hcl_file(json: &Value, output_file: PathBuf) -> std::io::Result<()> {
+    let hcl_content = json_to_hcl(json, 0);
+    // let mut file = std::fs::File::create(output_file)?;
+    std::fs::write(output_file, hcl_content.as_bytes())?;
+    // file.write(hcl_content.as_bytes())?;
+    Ok(())
 }

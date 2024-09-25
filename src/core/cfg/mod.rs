@@ -53,6 +53,8 @@ pub struct CubteraConfig {
     pub always_copy_files: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner: Option<HashMap<String, HashMap<String, String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<HashMap<String, HashMap<String, String>>>,
     #[serde(skip)]
     pub db_client: Option<mongodb::sync::Client>,
 }
@@ -112,6 +114,7 @@ impl Default for CubteraConfig {
             clean_cache: false,
             always_copy_files: true,
             runner: None,
+            state: None,
             db_client: None,
         }
     }
@@ -123,32 +126,57 @@ impl CubteraConfig {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct EnvConfig {
+    regular: HashMap<String, String>,
+    nested: HashMap<String, HashMap<String, String>>,
+    // Add other fields as needed
+}
+
 impl CubteraConfig {
     pub fn build(self) -> Self {
         // read all CUBTERA_* env vars overrides
+
         let cfg_env_vars = config::Config::builder()
-            .add_source(
-                config::Environment::with_prefix("CUBTERA")
-                    .ignore_empty(true)
-                // .prefix_separator("_")
-                // .separator("__"),
-                // .try_parsing(true)
-                // .list_separator(",")
-                // .with_list_parse_key("DB")
+            .add_source(config::Environment::with_prefix("CUBTERA")
+                .ignore_empty(true)
+                .prefix_separator("_")
+                .separator("__")
+                //.try_parsing(true)
             )
             .build()
             .unwrap_or_exit("Failed to read env vars".to_string())
-            .try_deserialize::<HashMap<String, String>>()
+            .try_deserialize::<HashMap<String, Value>>()
             .unwrap_or_exit("Failed to deserialize env vars".to_string());
+
+        //
+        // let cfg_env_vars = config::Config::builder()
+        //     .add_source(
+        //         config::Environment::with_prefix("CUBTERA")
+        //             .ignore_empty(true)
+        //             //.prefix_separator("_")
+        //             // .separator("__"),
+        //             // .try_parsing(true)
+        //             // .list_separator(",")
+        //             // .with_list_parse_key("DB")
+        //     )
+        //     .build()
+        //     .unwrap_or_exit("Failed to read env vars".to_string())
+        //     .try_deserialize::<HashMap<String, String>>()
+        //     .unwrap_or_exit("Failed to deserialize env vars".to_string());
 
         // read config file path from env vars
         let cfg_file_path = cfg_env_vars
             .get("config")
-            .cloned()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .map(|s| convert_path_to_absolute(s.clone()).unwrap_or(s.clone()))
+            // .cloned()
             .unwrap_or_else(||{
                 let path = "~/.cubtera/config.toml";
                 warn!(target: "cfg", "CUBTERA_CONFIG is not provided. Using: {}", path.blue());
-                let full_path = path.replace('~', &std::env::var("HOME").unwrap_or_default());
+                let full_path = convert_path_to_absolute(path.to_string())
+                    .unwrap_or_default();
+                    // path.replace('~', &std::env::var("HOME").unwrap_or_default());
 
                 // if !Path::new(&full_path).exists() {
                 //     warn!(target: "cfg", "Create default config file: {}", path.blue());
@@ -173,6 +201,7 @@ impl CubteraConfig {
             .add_source(config::File::from(Path::new(&cfg_file_path)))
             .build()
             .and_then(| cfg | cfg.try_deserialize::<HashMap<String, HashMap<String, Value>>>())
+            .check_with_warn("Failed to read config file")
             .unwrap_or_default();
 
             // .unwrap_or_else(|e|{
@@ -184,7 +213,9 @@ impl CubteraConfig {
 
         // read default section from config file
         let mut config = cfg_file.get("default").cloned().unwrap_or_default();
-        let org = cfg_env_vars.get("org").cloned().unwrap_or_else(||{
+        let org = cfg_env_vars.get("org").cloned()
+            .map(|v| v.as_str().unwrap().to_string())
+            .unwrap_or_else(||{
             warn!(target: "cfg", "CUBTERA_ORG is not provided. Using: {}", "cubtera".blue());
             "cubtera".to_string()
         });
@@ -193,7 +224,7 @@ impl CubteraConfig {
         config.extend(cfg_file.get(&org).cloned().unwrap_or_default());
         // extend with override default and org sections with env vars values
         config.extend(cfg_env_vars.into_iter()
-            .map(|(key, value)| (key, Value::String(value)))
+            .map(|(key, value)| (key, value))
             .collect::<HashMap<String, Value>>());
 
         if config.is_empty() {

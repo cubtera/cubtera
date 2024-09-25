@@ -85,9 +85,11 @@ pub fn run(sub_matches: &ArgMatches, storage: &Storage) {
     let extensions = extensions.as_slice();
     let unit = Unit::new(unit_name, dimensions, extensions, storage, context).build();
 
-    let runner = RunnerBuilder::new(unit, command).build();
-    runner.init()
-        .unwrap_or_exit("Failed to init runner".to_string());
-    runner.run()
-        .unwrap_or_exit("Failed to run unit".to_string());
+    let res = RunnerBuilder::new(unit, command)
+        .build()
+        .run()
+        .unwrap_or_exit("Unit runner failed".to_string());
+
+    let exit_code = res["exit_code"].as_i64().unwrap_or(0);
+    std::process::exit(exit_code as i32);
 }

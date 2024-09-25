@@ -13,6 +13,8 @@ pub struct BashRunnerParams {
     bin_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     extra_params: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inlet_command: Option<String>,
 }
 
 fn default_version() -> String {
