@@ -11,7 +11,7 @@ pub struct TfRunnerParams {
     #[serde(default="default_state_backend")]
     pub state_backend: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub bin_path: Option<String>,
+    pub runner_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_params: Option<String>,
     #[serde(default="default_lock_port")]
@@ -27,7 +27,7 @@ fn default_version() -> String {
 }
 
 fn default_state_backend() -> String {
-    String::from("s3")
+    String::from("local")
 }
 
 impl TfRunnerParams {

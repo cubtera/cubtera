@@ -126,13 +126,6 @@ impl CubteraConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct EnvConfig {
-    regular: HashMap<String, String>,
-    nested: HashMap<String, HashMap<String, String>>,
-    // Add other fields as needed
-}
-
 impl CubteraConfig {
     pub fn build(self) -> Self {
         // read all CUBTERA_* env vars overrides

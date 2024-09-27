@@ -53,8 +53,8 @@ impl Runner for BashRunner {
         params.get("extra_params").map(|s| args.push(s.clone()));
         // args.reverse();
 
-        let binary = params.get("bin_path")
-            .unwrap_or_exit("Runner binary path is not configured".into());
+        let binary = params.get("runner_command")
+            .unwrap_or_exit("Runner command is not configured".into());
 
         info!(target: "bash runner", "Execute command: {} {}", &binary.blue(), &args.join(" ").blue());
 

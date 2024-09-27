@@ -185,14 +185,16 @@ r#"variable "{}" {{
             if let Some(spec) = &self.load.unit.manifest.spec {
                 if let Some(version) = &spec.tf_version {
                     params.version = version.clone();
-                    params.bin_path = None;
+                    params.runner_command = None;
                     warn!(target: "tf runner", "{}: TF version is defined with {} in unit_manifest. \
                     Use {} instead.", "DEPRECATED".red(), "spec.tf_version".red(), "runner.version".blue());
                 }
             }
         }
 
-        let tf_path = match params.bin_path {
+
+        // TODO: change bin_path to runner_command
+        let tf_path = match params.runner_command {
             Some(bin_path) => {
                 info!(target: "tf runner", "Use custom binary path...");
                 Path::new(&bin_path).to_path_buf()

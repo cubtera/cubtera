@@ -10,7 +10,7 @@ pub struct BashRunnerParams {
     #[serde(default="default_state_backend")]
     state_backend: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    bin_path: Option<String>,
+    runner_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     extra_params: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
