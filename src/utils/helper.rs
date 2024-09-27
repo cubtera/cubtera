@@ -400,12 +400,27 @@ pub fn string_to_path(s: &str) -> PathBuf {
         }
     }
 
+    // Expand relative path to absolute
+    if path.starts_with("./") {
+        if let Ok(pwd) = std::env::var("PWD") {
+            path = path.replacen(".", &pwd, 1);
+        }
+    }
+
     // Expand environment variables in path string
     // Replace ${VAR} and $VAR with actual values
-    let with_env = std::env::vars().fold(path, |s, (k, v)| {
+    let mut with_env = std::env::vars().fold(path, |s, (k, v)| {
         s.replace(&format!("${}", k), &v)
             .replace(&format!("${{{}}}", k), &v)
     });
+
+    // Check if path is relative and convert to absolute
+    if Path::new(&with_env).is_relative() {
+        with_env = std::env::current_dir().unwrap()
+            .join(&with_env).to_str().unwrap().to_string();
+    }
+
+    dbg!(&with_env);
 
     // Convert to PathBuf
     PathBuf::from(with_env)
