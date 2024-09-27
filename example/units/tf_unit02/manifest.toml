@@ -1,0 +1,25 @@
+dimensions = ["dc"]
+allowList = ["stg1"]
+type = "tf"
+
+[spec.env_vars.optional]
+change_nat_ips = "CHANGE_NAT_IPS"
+
+[spec.env_vars.required]
+my_home = "PWD"
+
+[spec.files.optional]
+"main.tf" = "test_optional.txt"
+
+#[spec.files.required]
+#"main.tf" = "test_required.txt"
+
+#[state] # optional, override global state backend configuration
+
+[runner]
+version = "1.6.6" # if not set and runner_command is not set, it will run latest tf version
+# runner_command =  "terraform" # if defined - version will be ignored
+# extra_params = "--auto-approve" # default => None | extra params for the runner_command
+state_backend = "local" # state backend for the runner defined in config.toml, default is local
+# inlet_command = "ls -la" # default => None, will run command before runner_command starts, in temp folder context
+# outlet_command = "" # default => None, will run command after runner_command finishes successfully, in temp folder context

@@ -1,0 +1,12 @@
+dimensions = ["dome"]
+allowList = ["mgmt", "stg"]
+type = "tf"
+
+[runner]
+version = "1.6.6" # if not set and runner_command is not set, it will run latest tf version
+state_backend = "local" # state backend for the runner defined in config.toml, default is local
+
+# runner_command =  "terraform" # if defined - version will be ignored
+# extra_params = "--auto-approve" # default => None | extra params for the runner_command
+# inlet_command = "ls -la" # default => None, will run command before runner_command starts, in temp folder context
+# outlet_command = "" # default => None, will run command after runner_command finishes successfully, in temp folder context
