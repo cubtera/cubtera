@@ -3,13 +3,9 @@ mod bash;
 // mod tofu;
 
 use std::collections::HashMap;
-use std::error::Error;
-use std::process::ExitStatus;
-use rocket::http::uri::fmt::Kind::Path;
 use serde_json::{json, Value};
 
 use crate::prelude::*;
-
 
 // add new runner here
 fn runner_create(runner_type: RunnerType, load: RunnerLoad) -> Box<dyn Runner> {
@@ -20,7 +16,6 @@ fn runner_create(runner_type: RunnerType, load: RunnerLoad) -> Box<dyn Runner> {
         _ => exit_with_error(format!("Unknown runner type: {runner_type:?}. Check documentation about supported runners"))
     }
 }
-
 
 #[derive(Debug)]
 pub struct RunnerLoad {
@@ -50,7 +45,6 @@ impl RunnerType {
 }
 
 pub trait Runner {
-
     fn new(load: RunnerLoad) -> Self where Self: Sized;
     fn get_load(&self) -> &RunnerLoad;
     fn get_ctx(&self) -> &Value;
@@ -192,7 +186,6 @@ impl RunnerBuilder {
         self.unit.manifest.state.clone()
             .map(|s| state_backend = json!(s));
 
-        dbg!(state_backend.clone());
         state_backend = match state_backend.is_null() {
             true => {
                 debug!(target: "runner", "State backend config is not defined in global config or unit manifest. Using default.");
@@ -205,23 +198,11 @@ impl RunnerBuilder {
             false => json!({state_type: state_backend })
         };
 
-        // if state_backend.is_null() {
-        //     warn!(target: "runner", "State backend is not defined in global config or unit manifest. Using default state backend: 'local'");
-        //     json!({
-        //         "local": {
-        //             "path": "~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate",
-        //         }
-        //     });
-        // };
-
-        // let state_backend = json!({
-        //     state_type: state_backend
-        // });
-
         // apply handlebars template to state_backend definition
         let mut handlebars = handlebars::Handlebars::new();
         handlebars.set_strict_mode(true);
 
+        // Add values for state_backend template rendering
         let data = json!({
             "org": &GLOBAL_CFG.org,
             "unit_name": &self.unit.name,
@@ -251,18 +232,18 @@ trait RunnerParams {
     }
 }
 
-#[derive(Debug)]
-struct RunnerError {
-    msg: String,
-}
-
-impl std::fmt::Display for RunnerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.msg)
-    }
-}
-
-impl std::error::Error for RunnerError {}
+// #[derive(Debug)]
+// struct RunnerError {
+//     msg: String,
+// }
+//
+// impl std::fmt::Display for RunnerError {
+//     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+//         write!(f, "{}", self.msg)
+//     }
+// }
+//
+// impl std::error::Error for RunnerError {}
 
 fn apply_template_to_value(value: &Value, handlebars: &handlebars::Handlebars, data: &Value) -> Value {
     match value {

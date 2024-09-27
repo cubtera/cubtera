@@ -2,6 +2,7 @@ dimensions = ["dc"]
 allowList = ["stg1"]
 type = "tf"
 
+
 [spec.env_vars.optional]
 change_nat_ips = "CHANGE_NAT_IPS"
 
@@ -9,7 +10,7 @@ change_nat_ips = "CHANGE_NAT_IPS"
 my_home = "PWD"
 
 [spec.files.optional]
-"main.tf" = "test_optional.txt"
+"~/main.tf" = "test_optional.txt"
 
 #[spec.files.required]
 #"main.tf" = "test_required.txt"
