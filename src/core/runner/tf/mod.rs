@@ -1,5 +1,3 @@
-use crate::prelude::*;
-
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpListener;
@@ -11,25 +9,21 @@ use yansi::Paint;
 use serde_json::{json, Value};
 
 mod tfswitch;
-mod params;
 
 use tfswitch::tf_switch;
-use params::TfRunnerParams;
-use super::{Runner, RunnerParams, RunnerLoad};
+use super::{Runner, RunnerLoad};
+use crate::prelude::*;
 
 pub struct TfRunner {
     load: RunnerLoad,
-    params: TfRunnerParams,
     ctx: Value
 }
 
 impl Runner for TfRunner {
     fn new(load: RunnerLoad) -> Self {
-        let params = TfRunnerParams::init(load.params.clone());
         let ctx = Value::Object(serde_json::Map::new());
         TfRunner {
             load,
-            params,
             ctx
         }
     }
@@ -62,6 +56,7 @@ impl Runner for TfRunner {
             }
             if GLOBAL_CFG.always_copy_files {
                 self.load.unit.copy_files();
+                self.create_state_backend()?;
             }
         }
 
@@ -143,7 +138,7 @@ r#"variable "{}" {{
         }
 
         // TODO: Remove legacy spec after units lib is fixed and remove params var usage
-        let mut params = self.params.clone();
+        let mut params = self.load.params.clone();
         if !self.load.unit.manifest.runner.is_some() {
             if let Some(spec) = &self.load.unit.manifest.spec {
                 if let Some(version) = &spec.tf_version {
@@ -158,7 +153,9 @@ r#"variable "{}" {{
         let tf_path = match params.runner_command {
             Some(bin_path) => {
                 info!(target: "tf runner", "Use custom binary path...");
-                Path::new(&bin_path).to_path_buf()
+
+                string_to_path(&bin_path)
+                // Path::new(&bin_path).to_path_buf()
             },
             None => {
                 info!(target: "tf runner", "Run terraform version {}", &params.version.yellow());
@@ -167,7 +164,7 @@ r#"variable "{}" {{
             }
         };
 
-        if let Some(extra_params) = &self.params.extra_params {
+        if let Some(extra_params) = &self.load.params.extra_args {
             tf_args.extend(extra_params.split(" ").map(|s| s.to_string()));
         }
 
@@ -197,7 +194,7 @@ r#"variable "{}" {{
             // }
 
             loop {
-                match TcpListener::bind(("0.0.0.0", self.params.get_lock_port())) {
+                match TcpListener::bind(("0.0.0.0", self.load.params.get_lock_port())) {
                     Ok(listener) => {
                         socket = Some(listener);
                         break;
@@ -210,7 +207,7 @@ r#"variable "{}" {{
             }
         };
 
-        debug!(target: "tf runner", "Additional args: {}", &tf_args.join(" ").blue());
+        debug!(target: "tf runner", "Extra args: {}", &tf_args.join(" ").blue());
 
         let mut child = tf_command
             .current_dir(self.load.unit.temp_folder.to_str().unwrap())
@@ -219,6 +216,7 @@ r#"variable "{}" {{
             .envs(filtered_env_vars)
             .env("TF_VAR_org_name", &GLOBAL_CFG.org)
             .env("TF_VAR_unit_name", &self.load.unit.name)
+            // TODO: remove after units lib is fixed (LEGACY)
             .env("TF_VAR_tf_state_s3bucket", &GLOBAL_CFG.tf_state_s3bucket)
             .env("TF_VAR_tf_state_s3region", &GLOBAL_CFG.tf_state_s3region)
             .env(
@@ -337,38 +335,6 @@ impl TfRunner {
 
         tf_vars_args
     }
-
-    // fn tf_backend_conf_args(&self) -> Vec<String> {
-    //     let unit_state_path = format!(
-    //         "{}{}/{}.tfstate",
-    //         GLOBAL_CFG.tf_state_key_prefix.clone().unwrap_or_default(),
-    //         self.load.unit.get_unit_state_path(),
-    //         self.load.unit.name
-    //     );
-    //
-    //     debug!(target: "tf runner", "Unit state path: \n{:?}", unit_state_path);
-    //     debug!(target: "tf runner", "Unit state bucket: {}", GLOBAL_CFG.tf_state_s3bucket);
-    //
-    //     let local_state_path = "~/.cubtera".replace('~', &std::env::var("HOME").unwrap_or_default());
-    //     if GLOBAL_CFG.tf_state_s3bucket.is_empty() || &self.params.state_backend == "local" {
-    //         [
-    //             "-backend-config".to_string(),
-    //             format!("path={}/state/{}", local_state_path, unit_state_path),
-    //         ].to_vec()
-    //     }
-    //     else {
-    //         [
-    //             "-backend-config".to_string(),
-    //             format!("key={}", unit_state_path),
-    //             "-backend-config".to_string(),
-    //             format!("bucket={}", GLOBAL_CFG.tf_state_s3bucket),
-    //             "-backend-config".to_string(),
-    //             format!("region={}", GLOBAL_CFG.tf_state_s3region),
-    //             // "-backend-config".to_string(),
-    //             // format!("dynamodb_table=tf-state-lock"),
-    //         ].to_vec()
-    //     }
-    // }
 }
 
 fn json_to_hcl(json: &Value, indent: usize) -> String {
@@ -417,8 +383,6 @@ fn json_to_hcl(json: &Value, indent: usize) -> String {
 
 fn convert_json_to_hcl_file(json: &Value, output_file: PathBuf) -> std::io::Result<()> {
     let hcl_content = json_to_hcl(json, 0);
-    // let mut file = std::fs::File::create(output_file)?;
     std::fs::write(output_file, hcl_content.as_bytes())?;
-    // file.write(hcl_content.as_bytes())?;
     Ok(())
 }

@@ -2,6 +2,12 @@ dimensions = ["dc"]
 allowList = ["stg1"]
 type = "tf"
 
+overwrite = true # default => false
+# if set to true and unit is org specific, it will overwrite the general unit files
+# with the files from org specific unit with the same name
+# if set to false and unit is org specific, it will take files only from org specific unit
+# this parameter is ignored for non-org specific units.
+# Usefull for org specific changed in units to overwrite general unit files
 
 [spec.env_vars.optional]
 change_nat_ips = "CHANGE_NAT_IPS"
@@ -10,7 +16,7 @@ change_nat_ips = "CHANGE_NAT_IPS"
 my_home = "PWD"
 
 [spec.files.optional]
-"~/main.tf" = "test_optional.txt"
+"main.tf" = "test_optional.txt"
 
 #[spec.files.required]
 #"main.tf" = "test_required.txt"

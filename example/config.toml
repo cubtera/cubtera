@@ -44,7 +44,7 @@ state_backend = "s3" # or "local", default is S3 for tf runner
 inlet_command = "echo Inlet command" # default => None, will run command before runner starts, in temp folder context
 outlet_command = "echo Outlet command" # default => None, will run command after runner finishes successfully, in temp folder context
 
-version = "1.7.0" # default => latest, will be ignored if runner_command is set, will be latest if bot are not set
+# version = "1.7.0" # default => latest, will be ignored if runner_command is set, will be latest if bot are not set
 # runner_command = "terraform" # default => None, will run command with the runner
 # extra_params = "-json" # default => None, will add extra params to the runner_command
 

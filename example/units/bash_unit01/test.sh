@@ -1,1 +1,1 @@
-echo "BASH RUNNER | Current dir: ${PWD}"
+echo "BASH RUNNER with ${1} | Current dir: ${PWD}"

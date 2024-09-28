@@ -4,11 +4,12 @@ opt_dims = ["service"]
 type = "bash"
 
 [runner]
-inlet_command = "ls -la"
+inlet_command = "ls"
 outlet_command = "sleep 10"
 
 runner_command = "./test.sh"
-#extra_params = "-la"
+extra_args = "extra_args"
+
 version = "1.0.0" # not relevant for bash unit
 
 [spec.env_vars.optional]

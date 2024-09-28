@@ -415,12 +415,10 @@ pub fn string_to_path(s: &str) -> PathBuf {
     });
 
     // Check if path is relative and convert to absolute
-    if Path::new(&with_env).is_relative() {
-        with_env = std::env::current_dir().unwrap()
-            .join(&with_env).to_str().unwrap().to_string();
-    }
-
-    dbg!(&with_env);
+    // if Path::new(&with_env).is_relative() {
+    //     with_env = std::env::current_dir().unwrap()
+    //         .join(&with_env).to_str().unwrap().to_string();
+    // }
 
     // Convert to PathBuf
     PathBuf::from(with_env)
@@ -432,9 +430,10 @@ pub fn execute_command(
 ) -> Result<ExitStatus, Box<dyn std::error::Error>> {
     let mut command = command.split_whitespace();
     let binary = command.next().unwrap_or_exit("Command is empty".into());
+    let path = string_to_path(binary);
     let args = command.collect::<Vec<&str>>();
 
-    let mut process = std::process::Command::new(binary)
+    let mut process = std::process::Command::new(path)
         .current_dir(current_dir)
         .args(args)
         .spawn()?;
