@@ -4,6 +4,7 @@ opt_dims = ["service"]
 type = "bash"
 
 [runner]
+
 inlet_command = "ls"
 outlet_command = "sleep 10"
 

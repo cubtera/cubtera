@@ -409,7 +409,7 @@ pub fn string_to_path(s: &str) -> PathBuf {
 
     // Expand environment variables in path string
     // Replace ${VAR} and $VAR with actual values
-    let mut with_env = std::env::vars().fold(path, |s, (k, v)| {
+    let with_env = std::env::vars().fold(path, |s, (k, v)| {
         s.replace(&format!("${}", k), &v)
             .replace(&format!("${{{}}}", k), &v)
     });

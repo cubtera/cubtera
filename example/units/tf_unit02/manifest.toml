@@ -2,7 +2,6 @@ dimensions = ["dc"]
 allowList = ["stg1"]
 type = "tf"
 
-
 [spec.env_vars.optional]
 change_nat_ips = "CHANGE_NAT_IPS"
 

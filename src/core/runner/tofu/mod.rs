@@ -14,7 +14,7 @@ impl TofuRunner {}
 
 impl Runner for TofuRunner {
     fn new(load: RunnerLoad) -> Self {
-        let ctx = Value::Object(serde_json::Map::new());
+        // let ctx = Value::Object(serde_json::Map::new());
 
         match load.params.runner_command {
             Some(_) => TofuRunner{inner: TfRunner::new(load)},
