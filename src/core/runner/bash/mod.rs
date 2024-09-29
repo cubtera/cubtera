@@ -1,9 +1,7 @@
 // Simple bash runner implementation
 // Using default Runner Trait implementation's methods
 
-use crate::prelude::*;
 use super::{Runner, RunnerLoad};
-use yansi::Paint;
 use serde_json::Value;
 
 

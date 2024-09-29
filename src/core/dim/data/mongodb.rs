@@ -195,47 +195,48 @@ impl DataSource for MongoDBDataSource {
         self.context.clone()
     }
 
+    // TODO: Remove after usage check
     // Legacy method for dim defaults
     // ! Doesn't support context
-    fn get_data_dim_defaults(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let filter = doc! { "name": self.col_name.clone(), "context": { "$exists": false } };
-        let options = mongodb::options::FindOneOptions::builder()
-            .max_time(std::time::Duration::from_secs(5))
-            .build();
-        let col = self.db.collection::<Bson>("defaults");
-        let bson = col.find_one(filter, options)?;
-        let res = match bson {
-            Some(bson) => bson,
-            None => return Ok(json!({})),
-        };
-        let mut res = mongodb::bson::from_bson::<Value>(res)?;
-        let data = res["defaults"].take();
-        Ok(data)
-    }
+    // fn get_data_dim_defaults(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    //     let filter = doc! { "name": self.col_name.clone(), "context": { "$exists": false } };
+    //     let options = mongodb::options::FindOneOptions::builder()
+    //         .max_time(std::time::Duration::from_secs(5))
+    //         .build();
+    //     let col = self.db.collection::<Bson>("defaults");
+    //     let bson = col.find_one(filter, options)?;
+    //     let res = match bson {
+    //         Some(bson) => bson,
+    //         None => return Ok(json!({})),
+    //     };
+    //     let mut res = mongodb::bson::from_bson::<Value>(res)?;
+    //     let data = res["defaults"].take();
+    //     Ok(data)
+    // }
 
     // Legacy method for dim defaults
     // ! Doesn't support context
-    fn upsert_data_dim_defaults(&self, name: &str, data: Value) -> Result<(), Box<dyn std::error::Error>> {
-        let query = doc! { "name": name, "context": { "$exists": false } };
-        let data = serde_json::json!({
-            "name" : name,
-            "defaults" : data
-        });
-
-        let col = self.db.collection::<Bson>("defaults");
-        let replacement = mongodb::bson::to_bson(&data)?;
-        let options = mongodb::options::ReplaceOptions::builder().upsert(true).build();
-        let _ = col.replace_one(query, replacement, options)?;
-        
-        Ok(())
-    }
+    // fn upsert_data_dim_defaults(&self, name: &str, data: Value) -> Result<(), Box<dyn std::error::Error>> {
+    //     let query = doc! { "name": name, "context": { "$exists": false } };
+    //     let data = serde_json::json!({
+    //         "name" : name,
+    //         "defaults" : data
+    //     });
+    //
+    //     let col = self.db.collection::<Bson>("defaults");
+    //     let replacement = mongodb::bson::to_bson(&data)?;
+    //     let options = mongodb::options::ReplaceOptions::builder().upsert(true).build();
+    //     let _ = col.replace_one(query, replacement, options)?;
+    //
+    //     Ok(())
+    // }
 
     // Legacy method for dim defaults
     // ! Doesn't support context
-    fn delete_data_dim_defaults(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let filter = doc! { "name": name, "context": { "$exists": false } };
-        let col = self.db.collection::<Bson>("defaults");
-        let _ = col.delete_one(filter, None)?;
-        Ok(())
-    }
+    // fn delete_data_dim_defaults(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    //     let filter = doc! { "name": name, "context": { "$exists": false } };
+    //     let col = self.db.collection::<Bson>("defaults");
+    //     let _ = col.delete_one(filter, None)?;
+    //     Ok(())
+    // }
 }
