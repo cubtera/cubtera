@@ -3,7 +3,7 @@
 
 mod cmd;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     // Logger init
     cubtera::utils::logger_init();
 
@@ -12,6 +12,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("{e}");
         std::process::exit(1);
     }
-    Ok(())
 }
 

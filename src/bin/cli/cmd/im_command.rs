@@ -92,7 +92,7 @@ pub fn get_command() -> Command {
         ])
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
 pub fn run(subcommand: &ArgMatches, storage: &Storage) {
     match subcommand.subcommand() {
         Some(("getAll", sub_sub_matches)) => {
@@ -124,14 +124,14 @@ pub fn run(subcommand: &ArgMatches, storage: &Storage) {
                 storage,
                 sub_sub_matches.get_one::<String>("context").cloned()
             );
-            println!("{}", dim);
+            println!("{dim}");
         }
         Some(("getByParent", sub_sub_matches)) => {
             let dim_type = sub_sub_matches.get_one::<String>("dim_type").unwrap();
             let dim_name = sub_sub_matches.get_one::<String>("dim_name").unwrap();
             let dims = get_dim_kids(dim_type, dim_name, &GLOBAL_CFG.org, storage);
 
-            println!("{}", dims);
+            println!("{dims}");
         }
         Some(("getParent", sub_sub_matches)) => {
             let parent = get_dim_parent(
@@ -141,7 +141,7 @@ pub fn run(subcommand: &ArgMatches, storage: &Storage) {
                 storage,
             );
 
-            println!("{}", parent);
+            println!("{parent}");
         }
         Some(("getOrgs", _)) => {
             println!("{}", get_all_orgs(storage));
@@ -166,7 +166,7 @@ pub fn run(subcommand: &ArgMatches, storage: &Storage) {
 
             DimBuilder::new(&dim_type, &GLOBAL_CFG.org, &Storage::FS)
                 .with_context(sub_sub_matches.get_one::<String>("context").cloned())
-                .save_all_data_by_type()
+                .save_all_data_by_type();
         }
 
         Some(("sync", sub_sub_matches)) => {

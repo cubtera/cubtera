@@ -91,5 +91,6 @@ pub fn run(sub_matches: &ArgMatches, storage: &Storage) {
         .unwrap_or_exit("Unit runner failed".to_string());
 
     let exit_code = res["exit_code"].as_i64().unwrap_or(0);
+    #[allow(clippy::cast_possible_truncation)]
     std::process::exit(exit_code as i32);
 }

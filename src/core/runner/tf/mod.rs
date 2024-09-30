@@ -81,7 +81,7 @@ impl Runner for TfRunner {
         // for each file read json as value and create list of root keys
         if !files.is_empty() {
             let dim_tf_variables: String = files.iter()
-                .filter_map(|file| read_json_file(file))
+                .filter_map(read_json_file)
                 .filter_map(|json: serde_json::Value| json.as_object().map(|obj| obj.to_owned()))
                 .flat_map(|obj| obj.into_iter().map(|(k, _)| k))
                 .map(|key| format!(
@@ -96,7 +96,7 @@ r#"variable "{}" {{
                 .collect();
 
             let mut file = std::fs::File::create(
-                &self.load.unit.temp_folder.join("cubtera_vars.tf"))?;
+                self.load.unit.temp_folder.join("cubtera_vars.tf"))?;
             file.write_all(dim_tf_variables.as_bytes())?;
         }
 
@@ -139,7 +139,7 @@ r#"variable "{}" {{
 
         // TODO: Remove legacy spec after units lib is fixed and remove params var usage
         let mut params = self.load.params.clone();
-        if !self.load.unit.manifest.runner.is_some() {
+        if self.load.unit.manifest.runner.is_none() {
             if let Some(spec) = &self.load.unit.manifest.spec {
                 if let Some(version) = &spec.tf_version {
                     params.version = version.clone();
@@ -221,7 +221,7 @@ r#"variable "{}" {{
             .env("TF_VAR_tf_state_s3region", &GLOBAL_CFG.tf_state_s3region)
             .env(
                 "TF_VAR_tf_state_key_prefix",
-                &GLOBAL_CFG.tf_state_key_prefix.clone().unwrap_or_default(),
+                GLOBAL_CFG.tf_state_key_prefix.clone().unwrap_or_default(),
             )
             //.env("TF_DATA_DIR", &self.config.temp_folder_path)
             //.env("TF_PLUGIN_CACHE_DIR", "~/.terraform.d/plugin-cache")

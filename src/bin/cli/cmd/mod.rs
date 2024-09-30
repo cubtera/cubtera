@@ -54,12 +54,6 @@ pub fn get_args() -> CliResult<Cli> {
     };
 
     Ok(match matches.subcommand() {
-        // legacy command support
-        Some(("tf", sub_matches)) => Cli {
-            subcommand: sub_matches.clone(),
-            executor: run_command::run,
-            storage,
-        },
         Some(("im", sub_matches)) => Cli {
             subcommand: sub_matches.clone(),
             executor: im_command::run,
@@ -70,7 +64,7 @@ pub fn get_args() -> CliResult<Cli> {
             executor: log_command::run,
             storage,
         },
-        Some(("run", sub_matches)) => Cli {
+        Some(("run" | "tf", sub_matches)) => Cli {
             subcommand: sub_matches.clone(),
             executor: run_command::run,
             storage,

@@ -1,3 +1,4 @@
+#[allow(clippy::option_map_unit_fn)]
 mod tf;
 mod bash;
 mod params;
@@ -34,7 +35,7 @@ pub enum RunnerType {
 }
 
 impl RunnerType {
-    pub fn from_str(s: &str) -> Self {
+    pub fn str_to_runner_type(s: &str) -> Self {
         match s.to_uppercase().as_str() {
             "TF" => RunnerType::TF,
             "BASH" => RunnerType::BASH,
@@ -195,8 +196,11 @@ impl RunnerBuilder {
             .map(|s| state_backend = json!(s));
 
         // check if state type is defined in unit manifest
-        self.unit.manifest.state.clone()
-            .map(|s| state_backend = json!(s));
+        if let Some(state) = &self.unit.manifest.state {
+            state_backend = json!(state.clone());
+        }
+        // self.unit.manifest.state.clone()
+        //     .map(|s| state_backend = json!(s));
 
         state_backend = match state_backend.is_null() {
             true => {
@@ -232,7 +236,7 @@ impl RunnerBuilder {
             state_backend
         };
 
-        let runner_type = RunnerType::from_str(&self.unit.manifest.unit_type);
+        let runner_type = RunnerType::str_to_runner_type(&self.unit.manifest.unit_type);
         runner_create(runner_type, load)
     }
 }

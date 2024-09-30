@@ -46,7 +46,7 @@ pub fn run(subcommand: &ArgMatches, _: &Storage) {
                 .get_one::<String>("limit")
                 .unwrap_or(&"10".to_string()).parse().unwrap_or(10);
             let res = get_dlog_by_keys(&GLOBAL_CFG.org, keys.to_vec(), Some(limit));
-            println!("{}", res);
+            println!("{res}");
 
         }
         _ => unreachable!()
