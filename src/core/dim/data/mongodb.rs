@@ -1,22 +1,22 @@
 #![allow(dead_code)]
-use serde_json::{Value, json};
-use mongodb::sync::Client;
-use mongodb::sync::Database;
-use mongodb::sync::Collection;
-use mongodb::bson::{doc, Bson};
-use crate::prelude::*;
 use super::DataSource;
+use crate::prelude::*;
+use mongodb::bson::{doc, Bson};
+use mongodb::sync::Client;
+use mongodb::sync::Collection;
+use mongodb::sync::Database;
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone)]
 pub struct MongoDBDataSource {
     client: Client,
-    db_name: String, // org
+    db_name: String,  // org
     col_name: String, // dim_type
 
     col: Collection<Bson>,
     db: Database,
 
-    context: Option<String>
+    context: Option<String>,
 }
 
 impl MongoDBDataSource {
@@ -33,10 +33,10 @@ impl MongoDBDataSource {
                     db,
                     db_name,
                     col_name,
-                    context: None
+                    context: None,
                 }
-            },
-            None => exit_with_error("No DB config found".to_string())
+            }
+            None => exit_with_error("No DB config found".to_string()),
         }
     }
 }
@@ -64,7 +64,7 @@ impl DataSource for MongoDBDataSource {
 
         let filter = doc! { "name": name, "context": { "$exists": false }};
         let bson = self.col.find_one(filter, options)?;
-        
+
         let res = match bson {
             Some(bson) => bson,
             None => return Ok(json!({})),
@@ -92,7 +92,8 @@ impl DataSource for MongoDBDataSource {
     }
 
     fn get_all_names(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let data = self.get_all_data()?
+        let data = self
+            .get_all_data()?
             .iter()
             //.filter(|doc| doc["context"].is_null())
             .map(|doc| doc["name"].as_str().unwrap_or_default().to_string())
@@ -111,31 +112,41 @@ impl DataSource for MongoDBDataSource {
     fn upsert_all_data(&self, data: Vec<Value>) -> Result<(), Box<dyn std::error::Error>> {
         let mut session = self.client.start_session(None)?;
         let mut data = data;
-        data.iter_mut()
-            .for_each(|doc| {
-                if let Some(name) = doc.get("name").and_then(|name| name.as_str()) {
-                    let mut query = doc! { "name": name, "context": { "$exists": false } };
-                    if let Some(ctx) = &self.context {
-                        if !ctx.is_empty() {
-                            query = doc! { "name": name, "context": ctx };
-                            doc["context"] = json!(ctx);
-                        }
+        data.iter_mut().for_each(|doc| {
+            if let Some(name) = doc.get("name").and_then(|name| name.as_str()) {
+                let mut query = doc! { "name": name, "context": { "$exists": false } };
+                if let Some(ctx) = &self.context {
+                    if !ctx.is_empty() {
+                        query = doc! { "name": name, "context": ctx };
+                        doc["context"] = json!(ctx);
                     }
-                    let replacement = mongodb::bson::to_bson(&doc).unwrap_or_default();
-                    let options = mongodb::options::ReplaceOptions::builder().upsert(true).build();
-                    rocket::tokio::task::block_in_place(|| {
-                        let res = self.col.replace_one_with_session(query, replacement, options, &mut session);
-                        if res.is_err() {
-                            log::debug!("Upsert failed: {:?}", res.err());
-                        } 
-                    });
-                }   
-            });
-        
+                }
+                let replacement = mongodb::bson::to_bson(&doc).unwrap_or_default();
+                let options = mongodb::options::ReplaceOptions::builder()
+                    .upsert(true)
+                    .build();
+                rocket::tokio::task::block_in_place(|| {
+                    let res = self.col.replace_one_with_session(
+                        query,
+                        replacement,
+                        options,
+                        &mut session,
+                    );
+                    if res.is_err() {
+                        log::debug!("Upsert failed: {:?}", res.err());
+                    }
+                });
+            }
+        });
+
         Ok(())
     }
 
-    fn upsert_data_by_name(&self, name: &str, data: Value) -> Result<(), Box<dyn std::error::Error>> {
+    fn upsert_data_by_name(
+        &self,
+        name: &str,
+        data: Value,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut data = data;
         data["name"] = json!(name);
 
@@ -148,7 +159,9 @@ impl DataSource for MongoDBDataSource {
         }
 
         let replacement = mongodb::bson::to_bson(&data)?;
-        let options = mongodb::options::ReplaceOptions::builder().upsert(true).build();
+        let options = mongodb::options::ReplaceOptions::builder()
+            .upsert(true)
+            .build();
         let _ = self.col.replace_one(query, replacement, options)?;
         Ok(())
     }
@@ -163,9 +176,12 @@ impl DataSource for MongoDBDataSource {
         let _ = self.col.delete_one(filter, None)?;
         Ok(())
     }
-    
+
     fn delete_all_by_context(&self, context: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let db_names = &GLOBAL_CFG.db_client.as_ref().unwrap()
+        let db_names = &GLOBAL_CFG
+            .db_client
+            .as_ref()
+            .unwrap()
             .list_database_names(None, None)?;
         db_names.iter()
             .for_each(|name| {

@@ -4,10 +4,9 @@ use rand::Rng;
 use std::path::{Path, PathBuf};
 
 pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
-
     let version = match tf_version {
         "latest" => get_latest(),
-            _ => tf_version.into()
+        _ => tf_version.into(),
     };
 
     let _ = semver::Version::parse(&version).unwrap_or_exit(format!(
@@ -32,8 +31,9 @@ pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>
         std::fs::File::create(tf_folder.join("tmp.zip"))
             .unwrap_or_exit("Unable to create TF zip file".to_string());
         let os = get_os();
-        let url =
-            format!("https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{os}.zip",);
+        let url = format!(
+            "https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{os}.zip",
+        );
 
         log::debug!(target: "", "Downloading TF zip archive: {}", url);
 
@@ -61,12 +61,16 @@ pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>
         // ========================================================================
         // Sync implementation of zip file download
         // Async was in use with previous version (keep for a while for ref)
-        let response = reqwest::blocking::get(url)
-            .unwrap_or_exit("Error downloading TF zip file".to_string());
+        let response =
+            reqwest::blocking::get(url).unwrap_or_exit("Error downloading TF zip file".to_string());
         if !response.status().is_success() {
             std::fs::remove_file(Path::new(&path).join("tmp.zip"))
                 .unwrap_or_exit("Failed to remove TF zip file".to_string());
-            exit_with_error(format!("Error downloading TF binary version {}. Status: {}", version, response.status()));
+            exit_with_error(format!(
+                "Error downloading TF binary version {}. Status: {}",
+                version,
+                response.status()
+            ));
         }
         let body = response.bytes().unwrap_or_else(|_| {
             exit_with_error("Error downloading TF zip file".to_string());
@@ -96,12 +100,16 @@ pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>
 }
 
 fn get_latest() -> String {
-    let resp = reqwest::blocking::get("https://api.releases.hashicorp.com/v1/releases/terraform/latest")
-        .unwrap_or_exit("Can't define TF latest version".into())
-        .json::<serde_json::Value>()
-        .unwrap_or_exit("Can't parse TF version response".into());
+    let resp =
+        reqwest::blocking::get("https://api.releases.hashicorp.com/v1/releases/terraform/latest")
+            .unwrap_or_exit("Can't define TF latest version".into())
+            .json::<serde_json::Value>()
+            .unwrap_or_exit("Can't parse TF version response".into());
 
-    resp["version"].as_str().unwrap_or_exit("Can't parse TF version response".into()).to_string()
+    resp["version"]
+        .as_str()
+        .unwrap_or_exit("Can't parse TF version response".into())
+        .to_string()
 }
 
 fn get_os() -> String {

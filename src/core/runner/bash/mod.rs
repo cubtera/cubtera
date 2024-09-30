@@ -4,19 +4,15 @@
 use super::{Runner, RunnerLoad};
 use serde_json::Value;
 
-
 pub struct BashRunner {
     load: RunnerLoad,
-    ctx: Value
+    ctx: Value,
 }
 
 impl Runner for BashRunner {
     fn new(load: RunnerLoad) -> Self {
         let ctx = Value::Object(serde_json::Map::new());
-        BashRunner {
-            load,
-            ctx
-        }
+        BashRunner { load, ctx }
     }
 
     fn get_load(&self) -> &RunnerLoad {

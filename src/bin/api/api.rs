@@ -19,20 +19,14 @@ fn dims_data_by_type(r#type: &str, org: &str) -> Value {
 }
 
 #[get("/<org>/dim?<type>&<name>&<context>")]
-fn dim_by_name(
-    r#type: &str,
-    name: &str,
-    org: &str,
-    context: Option<String>,
-) -> Value { // -> dim data by type and name
+fn dim_by_name(r#type: &str, name: &str, org: &str, context: Option<String>) -> Value {
+    // -> dim data by type and name
     get_dim_by_name(r#type, name, org, &Storage::DB, context)
 }
 
 #[get("/<org>/dimDefaults?<type>")]
-fn dim_defaults_by_type(
-    r#type: &str,
-    org: &str,
-) -> Value { // -> dim data by type and name
+fn dim_defaults_by_type(r#type: &str, org: &str) -> Value {
+    // -> dim data by type and name
     get_dim_defaults_by_type(r#type, org, &Storage::DB)
 }
 
@@ -47,8 +41,7 @@ fn dims_by_parent(r#type: &str, name: &str, org: &str) -> Value {
 }
 
 #[get("/orgs")]
-fn all_orgs(
-    //key: ApiKey<'_> // <- Here we use our ApiKey guard
+fn all_orgs(//key: ApiKey<'_> // <- Here we use our ApiKey guard
 ) -> Value {
     get_all_orgs(&Storage::DB)
 }
@@ -104,12 +97,11 @@ pub async fn rocket() -> Rocket<Build> {
 //         .launch();
 // }
 
-
 // API key guard implementation
 // add ( key: ApiKey<'_> ) for all required routes params to enable it
-use rocket::http::Status;
-use rocket::request::{Outcome, FromRequest};
 use cubtera::prelude::data::Storage;
+use rocket::http::Status;
+use rocket::request::{FromRequest, Outcome};
 
 struct ApiKey<'r>(&'r str);
 

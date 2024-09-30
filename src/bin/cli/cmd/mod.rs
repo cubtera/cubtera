@@ -1,5 +1,5 @@
-use cubtera::prelude::*;
 use cubtera::core::dim::data::Storage;
+use cubtera::prelude::*;
 
 use clap::{command, ArgMatches};
 mod im_command;
@@ -19,11 +19,7 @@ pub fn get_matches() -> ArgMatches {
         .subcommand(im_command::get_command())
         .subcommand(log_command::get_command())
         .subcommand(run_command::get_command())
-        .subcommand(
-            command!("config")
-                .about("Show configuration")
-                .alias("cfg")
-        )
+        .subcommand(command!("config").about("Show configuration").alias("cfg"))
         .get_matches()
 }
 

@@ -1,12 +1,12 @@
-#[allow(clippy::option_map_unit_fn)]
-mod tf;
 mod bash;
 mod params;
+#[allow(clippy::option_map_unit_fn)]
+mod tf;
 mod tofu;
 
-use std::collections::HashMap;
-use serde_json::{json, Value};
 use crate::prelude::*;
+use serde_json::{json, Value};
+use std::collections::HashMap;
 
 // add new runner here
 fn runner_create(runner_type: RunnerType, load: RunnerLoad) -> Box<dyn Runner> {
@@ -14,16 +14,18 @@ fn runner_create(runner_type: RunnerType, load: RunnerLoad) -> Box<dyn Runner> {
         RunnerType::TF => Box::new(tf::TfRunner::new(load)),
         RunnerType::BASH => Box::new(bash::BashRunner::new(load)),
         RunnerType::TOFU => Box::new(tofu::TofuRunner::new(load)),
-        _ => exit_with_error(format!("Unknown runner type: {runner_type:?}. Check documentation about supported runners"))
+        _ => exit_with_error(format!(
+            "Unknown runner type: {runner_type:?}. Check documentation about supported runners"
+        )),
     }
 }
 
 #[derive(Debug)]
 pub struct RunnerLoad {
     unit: Unit,
-    command: Vec<String>, // command from cli
+    command: Vec<String>,         // command from cli
     params: params::RunnerParams, // HashMap<String, String>, // runner params from unit manifest and global config
-    state_backend: Value
+    state_backend: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +33,7 @@ pub enum RunnerType {
     TF,
     BASH,
     TOFU,
-    UNKNOWN
+    UNKNOWN,
 }
 
 impl RunnerType {
@@ -40,32 +42,39 @@ impl RunnerType {
             "TF" => RunnerType::TF,
             "BASH" => RunnerType::BASH,
             "TOFU" => RunnerType::TOFU,
-            _ => RunnerType::UNKNOWN
+            _ => RunnerType::UNKNOWN,
         }
     }
 }
 
 pub trait Runner {
-    fn new(load: RunnerLoad) -> Self where Self: Sized;
+    fn new(load: RunnerLoad) -> Self
+    where
+        Self: Sized;
     fn get_load(&self) -> &RunnerLoad;
     fn get_ctx(&self) -> &Value;
     fn get_ctx_mut(&mut self) -> &mut Value;
 
-    fn copy_files(&mut self) -> Result<(), Box<dyn std::error::Error>>{
+    fn copy_files(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         debug!(target: "runner", "Default copy_files method.");
 
         self.get_load().unit.remove_temp_folder();
         self.get_load().unit.copy_files();
 
         self.update_ctx("copy_files", json!("executed"));
-        let working_dir = self.get_load().unit.temp_folder.clone()
-            .to_string_lossy().to_string();
+        let working_dir = self
+            .get_load()
+            .unit
+            .temp_folder
+            .clone()
+            .to_string_lossy()
+            .to_string();
         self.update_ctx("working_dir", json!(working_dir));
 
         Ok(())
     }
 
-    fn change_files(&mut self) -> Result<(), Box<dyn std::error::Error>>{
+    fn change_files(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         debug!(target: "runner", "Default change_files method. Do nothing.");
         self.update_ctx("change_files", json!("passed"));
         Ok(())
@@ -101,7 +110,6 @@ pub trait Runner {
     }
 
     fn run(&mut self) -> Result<Value, Box<dyn std::error::Error>> {
-
         self.copy_files()?;
         self.change_files()?;
         self.inlet()?;
@@ -120,8 +128,13 @@ pub trait Runner {
     fn executor(&mut self, step: &str) -> Result<(), Box<dyn std::error::Error>> {
         use yansi::Paint; // don't move this to the top - conflicts with a crate
 
-        let dir = self.get_load().unit.temp_folder.clone()
-            .to_string_lossy().to_string();
+        let dir = self
+            .get_load()
+            .unit
+            .temp_folder
+            .clone()
+            .to_string_lossy()
+            .to_string();
 
         let params = self.get_load().params.clone();
         let args = self.get_load().command.clone();
@@ -129,10 +142,13 @@ pub trait Runner {
         let command = match step {
             "inlet" => params.inlet_command,
             "outlet" => params.outlet_command,
-            "runner" => params.runner_command
+            "runner" => params
+                .runner_command
                 .and_then(|cmd| format!("{} {}", cmd, args.join(" ")).into())
-                .and_then(|cmd| format!("{} {}", cmd, params.extra_args.unwrap_or_default()).into()),
-            _ => None
+                .and_then(|cmd| {
+                    format!("{} {}", cmd, params.extra_args.unwrap_or_default()).into()
+                }),
+            _ => None,
         };
 
         if let Some::<String>(command) = command {
@@ -148,22 +164,18 @@ pub trait Runner {
 
 pub struct RunnerBuilder {
     unit: Unit,
-    command: Vec<String>
+    command: Vec<String>,
 }
 
 impl RunnerBuilder {
     pub fn new(unit: Unit, command: Vec<String>) -> Self {
-        RunnerBuilder {
-            unit,
-            command
-        }
+        RunnerBuilder { unit, command }
     }
 
     pub fn build(&self) -> Box<dyn Runner> {
         let mut params = HashMap::new();
         let mut state_type = "";
         let mut state_backend = Value::Null;
-
 
         if let Some(runner) = &GLOBAL_CFG.runner {
             // let config_runner = runner.get(&self.unit.manifest.unit_type);
@@ -172,7 +184,9 @@ impl RunnerBuilder {
                 params.extend(config_runner_params.clone());
 
                 // check if state type is defined in global config and overwrite default
-                config_runner_params.get("state_backend").map(|s| state_type = s);
+                config_runner_params
+                    .get("state_backend")
+                    .map(|s| state_type = s);
             }
         }
 
@@ -181,7 +195,9 @@ impl RunnerBuilder {
             params.extend(manifest_runner_params.clone());
 
             // check if state type is defined in unit manifest and overwrite global config
-            manifest_runner_params.get("state_backend").map(|s| state_type = s);
+            manifest_runner_params
+                .get("state_backend")
+                .map(|s| state_type = s);
         }
 
         if state_type.is_empty() {
@@ -190,7 +206,8 @@ impl RunnerBuilder {
         }
 
         // check if state type is defined in global config
-        GLOBAL_CFG.clone()
+        GLOBAL_CFG
+            .clone()
             .state
             .and_then(|s| s.get(state_type).cloned())
             .map(|s| state_backend = json!(s));
@@ -210,8 +227,8 @@ impl RunnerBuilder {
                         "path": "~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate",
                     }
                 })
-            },
-            false => json!({state_type: state_backend })
+            }
+            false => json!({state_type: state_backend }),
         };
 
         // TODO: Move this to a separate function
@@ -233,7 +250,7 @@ impl RunnerBuilder {
             unit: self.unit.clone(),
             command: self.command.clone(),
             params,
-            state_backend
+            state_backend,
         };
 
         let runner_type = RunnerType::str_to_runner_type(&self.unit.manifest.unit_type);
@@ -241,7 +258,11 @@ impl RunnerBuilder {
     }
 }
 
-fn apply_template_to_value(value: &Value, handlebars: &handlebars::Handlebars, data: &Value) -> Value {
+fn apply_template_to_value(
+    value: &Value,
+    handlebars: &handlebars::Handlebars,
+    data: &Value,
+) -> Value {
     match value {
         Value::Object(map) => {
             let mut new_map = serde_json::Map::new();
@@ -258,7 +279,9 @@ fn apply_template_to_value(value: &Value, handlebars: &handlebars::Handlebars, d
             Value::Array(new_arr)
         }
         Value::String(s) => {
-            let templated = handlebars.render_template(s, data).unwrap_or_else(|_| s.clone());
+            let templated = handlebars
+                .render_template(s, data)
+                .unwrap_or_else(|_| s.clone());
             Value::String(templated)
         }
         _ => value.clone(),

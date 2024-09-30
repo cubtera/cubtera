@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RunnerParams {
-    #[serde(default="default_version")]
+    #[serde(default = "default_version")]
     pub version: String,
-    #[serde(default="default_state_backend")]
+    #[serde(default = "default_state_backend")]
     pub state_backend: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_command: Option<String>,
@@ -16,14 +16,16 @@ pub struct RunnerParams {
     pub inlet_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outlet_command: Option<String>,
-    #[serde(default="default_lock_port")]
-    pub lock_port: String
+    #[serde(default = "default_lock_port")]
+    pub lock_port: String,
 }
 
 impl RunnerParams {
     pub fn init(params: HashMap<String, String>) -> Self {
-        let value = serde_json::to_value(params).unwrap_or_exit("Failed to convert runner params".into());
-        serde_json::from_value::<RunnerParams>(value).unwrap_or_exit("Failed to convert runner params".into())
+        let value =
+            serde_json::to_value(params).unwrap_or_exit("Failed to convert runner params".into());
+        serde_json::from_value::<RunnerParams>(value)
+            .unwrap_or_exit("Failed to convert runner params".into())
     }
 
     pub fn get_params_hashmap(&self) -> HashMap<String, String> {

@@ -3,10 +3,9 @@ use data::*;
 
 use crate::prelude::*;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
 
 #[derive(Debug, Clone, Default)]
 pub struct Dim {
@@ -43,36 +42,40 @@ impl Dim {
 
     // Save all not json files from dimension folder to a path (usually temp folder for a unit)
     pub fn save_dim_includes(&self, path: PathBuf) -> Result<(), std::io::Error> {
-        let files  = std::fs::read_dir(&self.dim_path)?;
-        let files_chain  = std::fs::read_dir(&self.dim_path)?;
-        files.filter_map(|entry| entry.ok())
+        let files = std::fs::read_dir(&self.dim_path)?;
+        let files_chain = std::fs::read_dir(&self.dim_path)?;
+        files
+            .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
             .filter(|entry| entry.is_file())
             .filter(|entry| entry.extension().unwrap_or_default() != "json")
-            .filter_map(|file| file.clone().file_stem()
-                .and_then(std::ffi::OsStr::to_str)
-                .filter(|file_name| file_name.starts_with(".default:"))
-                .map(|_| file)
-            )
+            .filter_map(|file| {
+                file.clone()
+                    .file_stem()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .filter(|file_name| file_name.starts_with(".default:"))
+                    .map(|_| file)
+            })
             .chain(
                 files_chain
                     .filter_map(|entry| entry.ok())
                     .map(|entry| entry.path())
                     .filter(|entry| entry.is_file())
                     .filter(|entry| entry.extension().unwrap_or_default() != "json")
-                    .filter_map(|file| file.clone().file_stem()
-                        .and_then(std::ffi::OsStr::to_str)
-                        .filter(|file_name| file_name.starts_with(&format!("{}:", self.dim_name)))
-                        .map(|_| file)
-                    )
+                    .filter_map(|file| {
+                        file.clone()
+                            .file_stem()
+                            .and_then(std::ffi::OsStr::to_str)
+                            .filter(|file_name| {
+                                file_name.starts_with(&format!("{}:", self.dim_name))
+                            })
+                            .map(|_| file)
+                    }),
             )
-            .try_for_each(|file:std::path::PathBuf| -> std::io::Result<()> {
+            .try_for_each(|file: std::path::PathBuf| -> std::io::Result<()> {
                 let file_name = file.clone();
                 let file_name = file_name.file_name().unwrap_or_default();
-                let file_name = file_name
-                    .to_str().unwrap_or_default()
-                    .split(':')
-                    .last();
+                let file_name = file_name.to_str().unwrap_or_default().split(':').last();
                 if file_name.is_some() && file_name.unwrap().ne("") {
                     std::fs::copy(file, path.join(file_name.unwrap()))?;
                 }
@@ -82,34 +85,36 @@ impl Dim {
 
     // Save dimension folders from inventory to a path (usually temp folder for a unit)
     pub fn save_dim_folders(&self, path: PathBuf) -> Result<(), std::io::Error> {
-        let files  = std::fs::read_dir(&self.dim_path)?;
-        let files_chain  = std::fs::read_dir(&self.dim_path)?;
-        files.filter_map(|entry| entry.ok())
+        let files = std::fs::read_dir(&self.dim_path)?;
+        let files_chain = std::fs::read_dir(&self.dim_path)?;
+        files
+            .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
             .filter(|entry| entry.is_dir())
-            .filter_map(|dir| dir.clone().file_name()
-                .and_then(std::ffi::OsStr::to_str)
-                .filter(|dir_name| dir_name.starts_with(".default:"))
-                .map(|_| dir)
-            )
+            .filter_map(|dir| {
+                dir.clone()
+                    .file_name()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .filter(|dir_name| dir_name.starts_with(".default:"))
+                    .map(|_| dir)
+            })
             .chain(
                 files_chain
                     .filter_map(|entry| entry.ok())
                     .map(|entry| entry.path())
                     .filter(|entry| entry.is_dir())
-                    .filter_map(|dir: PathBuf| dir.clone().file_name()
-                        .and_then(std::ffi::OsStr::to_str)
-                        .filter(|dir_name| dir_name.starts_with(&format!("{}:", self.dim_name)))
-                        .map(|_| dir)
-                    )
+                    .filter_map(|dir: PathBuf| {
+                        dir.clone()
+                            .file_name()
+                            .and_then(std::ffi::OsStr::to_str)
+                            .filter(|dir_name| dir_name.starts_with(&format!("{}:", self.dim_name)))
+                            .map(|_| dir)
+                    }),
             )
-            .try_for_each(|dir:std::path::PathBuf| -> std::io::Result<()> {
+            .try_for_each(|dir: std::path::PathBuf| -> std::io::Result<()> {
                 let dir_name = dir.clone();
                 let dir_name = dir_name.file_name().unwrap_or_default();
-                let dir_name = dir_name
-                    .to_str().unwrap_or_default()
-                    .split(':')
-                    .last();
+                let dir_name = dir_name.to_str().unwrap_or_default().split(':').last();
                 if let Some(dir_name) = dir_name {
                     if !dir_name.is_empty() {
                         copy_folder(dir, &path.join(dir_name), true);
@@ -189,7 +194,9 @@ impl DimBuilder {
     pub fn new(dim_type: &str, org: &str, storage: &Storage) -> Self {
         let datasource = data_src_init(org, dim_type, storage.clone());
         Self {
-            dim_path: Path::new(&GLOBAL_CFG.inventory_path).join(org).join(dim_type),
+            dim_path: Path::new(&GLOBAL_CFG.inventory_path)
+                .join(org)
+                .join(dim_type),
             dim_type: dim_type.into(),
             org: org.into(),
             datasource,
@@ -235,7 +242,8 @@ impl DimBuilder {
             warn!("No dim_relations found in config");
             return HashMap::new();
         }
-        let child_index = GLOBAL_CFG.dim_relations
+        let child_index = GLOBAL_CFG
+            .dim_relations
             .iter()
             .position(|r| r == &self.dim_type)
             .map(|x| x + 1)
@@ -254,9 +262,7 @@ impl DimBuilder {
                 let parent = data["meta"]["parent"].as_str().unwrap_or_default();
                 parent == format!("{}:{}", &self.dim_type, &self.dim_name)
             })
-            .map(|data| {
-                data["name"].as_str().unwrap_or_default().into()
-            })
+            .map(|data| data["name"].as_str().unwrap_or_default().into())
             .collect::<Vec<String>>();
 
         let mut kids: HashMap<String, Vec<String>> = HashMap::new();
@@ -271,7 +277,7 @@ impl DimBuilder {
         self
     }
 
-    pub fn get_all_dim_names (&self) -> Vec<String> {
+    pub fn get_all_dim_names(&self) -> Vec<String> {
         self.datasource.get_all_names().unwrap_or_default()
     }
 
@@ -311,7 +317,7 @@ impl DimBuilder {
             Some(parent) => parent.key_path,
             None => Path::new("").to_path_buf(),
         }
-            .join(format!("{}:{}", &self.dim_type, &self.dim_name));
+        .join(format!("{}:{}", &self.dim_type, &self.dim_name));
 
         self.data["name"] = Value::String(self.dim_name.clone());
 
@@ -331,27 +337,22 @@ impl DimBuilder {
     }
 
     pub fn read_data(mut self) -> Self {
-        let data = self.datasource
+        let data = self
+            .datasource
             .get_data_by_name(&self.dim_name)
             .unwrap_or_default();
-        data.get("meta").is_none().then(||
-        {
-            match self.storage {
-                Storage::FS => {
-                    exit_with_error(format!(
-                        "Can't find meta data for dimension {}:{}",
-                        self.dim_type, self.dim_name
-                    ))
-                }
-                Storage::DB => {
-                    warn!(target: "",
-                            "Can't find meta data for dimension {}:{}",
-                            self.dim_type, self.dim_name
-                        )
-                }
+        data.get("meta").is_none().then(|| match self.storage {
+            Storage::FS => exit_with_error(format!(
+                "Can't find meta data for dimension {}:{}",
+                self.dim_type, self.dim_name
+            )),
+            Storage::DB => {
+                warn!(target: "",
+                    "Can't find meta data for dimension {}:{}",
+                    self.dim_type, self.dim_name
+                )
             }
-        }
-        );
+        });
         self.data = data.clone();
         self
     }
@@ -359,36 +360,31 @@ impl DimBuilder {
     pub fn save_data(&self) {
         let mut data = self.data.clone();
         data["name"] = json!(self.dim_name);
-        self.datasource.upsert_data_by_name(
-            &self.dim_name, data
-        ).unwrap_or_exit(format!(
-            "Error saving dim {} data to DB:",
-            &self.dim_name
-        ));
+        self.datasource
+            .upsert_data_by_name(&self.dim_name, data)
+            .unwrap_or_exit(format!("Error saving dim {} data to DB:", &self.dim_name));
     }
 
     pub fn save_all_data_by_type(&self) {
         let data = self.get_all_dim_data();
         let count = data.clone().len();
 
-        let builder = DimBuilder::new(&self.dim_type, &self.org,&Storage::DB)
+        let builder = DimBuilder::new(&self.dim_type, &self.org, &Storage::DB)
             .with_context(self.datasource.get_context());
-        builder.datasource
+        builder
+            .datasource
             .upsert_all_data(data)
-            .unwrap_or_exit(format!(
-                "Error saving dim {} data to DB:",
-                &self.dim_type
-            ));
+            .unwrap_or_exit(format!("Error saving dim {} data to DB:", &self.dim_type));
         info!("{count} dim names of {} were saved", &self.dim_type);
     }
 
     pub fn delete_data(&self) {
-        self.datasource.delete_data_by_name(
-            &self.dim_name
-        ).unwrap_or_exit(format!(
-            "Error deleting dim {} data from DB:",
-            &self.dim_name
-        ));
+        self.datasource
+            .delete_data_by_name(&self.dim_name)
+            .unwrap_or_exit(format!(
+                "Error deleting dim {} data from DB:",
+                &self.dim_name
+            ));
     }
 
     // ------------------ default data ------------------
@@ -397,14 +393,13 @@ impl DimBuilder {
     }
 
     pub fn read_default_data(mut self) -> Self {
-        let data = self.datasource.get_data_by_name("_default").unwrap_or_default();
+        let data = self
+            .datasource
+            .get_data_by_name("_default")
+            .unwrap_or_default();
         self.default_data = match self.storage {
-            Storage::DB => {
-                data.get("data").cloned().unwrap_or_default()
-            }
-            Storage::FS => {
-                data
-            }
+            Storage::DB => data.get("data").cloned().unwrap_or_default(),
+            Storage::FS => data,
         };
         self
     }
@@ -416,7 +411,8 @@ impl DimBuilder {
             "data" : data
         });
 
-        self.datasource.upsert_data_by_name("_default", data)
+        self.datasource
+            .upsert_data_by_name("_default", data)
             .unwrap_or_exit(format!(
                 "Error saving default data {} to DB:",
                 &self.dim_type
@@ -424,7 +420,8 @@ impl DimBuilder {
     }
 
     pub fn delete_default_data(&self) {
-        self.datasource.delete_data_by_name("_default")
+        self.datasource
+            .delete_data_by_name("_default")
             .unwrap_or_exit(format!(
                 "Error deleting default data {} from DB:",
                 &self.dim_type
@@ -433,18 +430,19 @@ impl DimBuilder {
 
     pub fn delete_all_data_by_context(&self) {
         if let Some(context) = self.datasource.get_context() {
-            self.datasource.delete_all_by_context(&context)
+            self.datasource
+                .delete_all_by_context(&context)
                 .unwrap_or_exit(format!(
                     "Error deleting all data by context {} from DB:",
                     &self.dim_type
                 ));
         }
-        self.datasource.delete_all_by_context(
-            &self.datasource.get_context().unwrap_or_default()
-        ).unwrap_or_exit(format!(
-            "Error deleting all data by context {} from DB:",
-            &self.dim_type
-        ));
+        self.datasource
+            .delete_all_by_context(&self.datasource.get_context().unwrap_or_default())
+            .unwrap_or_exit(format!(
+                "Error deleting all data by context {} from DB:",
+                &self.dim_type
+            ));
     }
 
     // helper methods related to DimBuilder

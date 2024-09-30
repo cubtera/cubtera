@@ -1,6 +1,6 @@
-use cubtera::prelude::*;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use cubtera::core::dim::data::Storage;
+use cubtera::prelude::*;
 
 pub fn get_command() -> Command {
     Command::new("run")
@@ -72,7 +72,7 @@ pub fn run(sub_matches: &ArgMatches, storage: &Storage) {
         .unwrap_or_default()
         .map(std::string::ToString::to_string)
         .collect::<Vec<String>>();
-        // .join(" ");
+    // .join(" ");
 
     let context = sub_matches.get_one::<String>("context").cloned();
 

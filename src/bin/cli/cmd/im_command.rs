@@ -1,6 +1,6 @@
-use cubtera::prelude::*;
-use cubtera::core::dim::data::Storage;
 use clap::{Arg, ArgAction, ArgMatches, Command};
+use cubtera::core::dim::data::Storage;
+use cubtera::prelude::*;
 
 fn get_dim_type_arg() -> Arg {
     Arg::new("dim_type")
@@ -53,7 +53,7 @@ pub fn get_command() -> Command {
                         .help("Context")
                         .value_name("context")
                         .required(false)
-                        .short('c')
+                        .short('c'),
                 ),
             Command::new("getByParent")
                 .about("Get all kids of a dim_type:dim_name")
@@ -86,9 +86,8 @@ pub fn get_command() -> Command {
                     Arg::new("context")
                         .help("Context")
                         .value_name("context")
-                        .required(true)
-                        //.short('c')
-                )
+                        .required(true), //.short('c')
+                ),
         ])
 }
 
@@ -100,29 +99,38 @@ pub fn run(subcommand: &ArgMatches, storage: &Storage) {
                 .get_one::<String>("dim_type")
                 .unwrap()
                 .to_string();
-            println!("{}", get_dim_names_by_type(&dim_type, &GLOBAL_CFG.org, storage));
+            println!(
+                "{}",
+                get_dim_names_by_type(&dim_type, &GLOBAL_CFG.org, storage)
+            );
         }
         Some(("getAllData", sub_sub_matches)) => {
             let dim_type = sub_sub_matches
                 .get_one::<String>("dim_type")
                 .unwrap()
                 .to_string();
-            println!("{}", get_dims_data_by_type(&dim_type, &GLOBAL_CFG.org, storage));
+            println!(
+                "{}",
+                get_dims_data_by_type(&dim_type, &GLOBAL_CFG.org, storage)
+            );
         }
         Some(("getDefaults", sub_sub_matches)) => {
             let dim_type = sub_sub_matches
                 .get_one::<String>("dim_type")
                 .unwrap()
                 .to_string();
-            println!("{}", get_dim_defaults_by_type(&dim_type, &GLOBAL_CFG.org, storage));
-        },
+            println!(
+                "{}",
+                get_dim_defaults_by_type(&dim_type, &GLOBAL_CFG.org, storage)
+            );
+        }
         Some(("getByName", sub_sub_matches)) => {
             let dim = get_dim_by_name(
                 sub_sub_matches.get_one::<String>("dim_type").unwrap(),
                 sub_sub_matches.get_one::<String>("dim_name").unwrap(),
                 &GLOBAL_CFG.org,
                 storage,
-                sub_sub_matches.get_one::<String>("context").cloned()
+                sub_sub_matches.get_one::<String>("context").cloned(),
             );
             println!("{dim}");
         }
@@ -170,9 +178,7 @@ pub fn run(subcommand: &ArgMatches, storage: &Storage) {
         }
 
         Some(("sync", sub_sub_matches)) => {
-            let dim_type = sub_sub_matches
-                .get_one::<String>("dim_type")
-                .unwrap();
+            let dim_type = sub_sub_matches.get_one::<String>("dim_type").unwrap();
             DimBuilder::new(dim_type, &GLOBAL_CFG.org, &Storage::FS)
                 .with_name(sub_sub_matches.get_one::<String>("dim_name").unwrap())
                 .read_data()
@@ -183,21 +189,16 @@ pub fn run(subcommand: &ArgMatches, storage: &Storage) {
         }
 
         Some(("deleteContext", sub_sub_matches)) => {
-            let context = sub_sub_matches
-                .get_one::<String>("context").cloned();
-            DimBuilder::new("", &GLOBAL_CFG.org,&Storage::DB)
+            let context = sub_sub_matches.get_one::<String>("context").cloned();
+            DimBuilder::new("", &GLOBAL_CFG.org, &Storage::DB)
                 .with_context(context)
                 .delete_all_data_by_context();
         }
 
         Some(("validate", sub_sub_matches)) => {
-            let dim_type = sub_sub_matches
-                .get_one::<String>("dim_type")
-                .unwrap();
-            let dim_name = sub_sub_matches
-                .get_one::<String>("dim_name")
-                .unwrap();
-            let _ = DimBuilder::new(dim_type, &GLOBAL_CFG.org,&Storage::FS)
+            let dim_type = sub_sub_matches.get_one::<String>("dim_type").unwrap();
+            let dim_name = sub_sub_matches.get_one::<String>("dim_name").unwrap();
+            let _ = DimBuilder::new(dim_type, &GLOBAL_CFG.org, &Storage::FS)
                 .with_name(dim_name)
                 .read_data()
                 .build();

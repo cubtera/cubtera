@@ -1,15 +1,15 @@
 #![allow(dead_code)]
 use super::DataSource;
 use crate::prelude::*;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct JsonDataSource {
-    path: PathBuf, // <inventory_path>/org/dim_type/
+    path: PathBuf,    // <inventory_path>/org/dim_type/
     col_name: String, // dim_type
 
-    context: Option<String>
+    context: Option<String>,
 }
 
 impl JsonDataSource {
@@ -18,16 +18,17 @@ impl JsonDataSource {
         Self {
             path,
             col_name: dim_type.into(),
-            context: None
+            context: None,
         }
     }
 }
 
 impl DataSource for JsonDataSource {
-
     fn get_data_by_name(&self, name: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let mut filter = format!("{}:", name);
-        if filter.starts_with('_') {filter.replace_range(0..1, ".")};
+        if filter.starts_with('_') {
+            filter.replace_range(0..1, ".")
+        };
 
         let mut data = std::fs::read_dir(&self.path)
             .unwrap_or_exit(format!("Can't read data folder: {:?}", self.path))
@@ -35,23 +36,25 @@ impl DataSource for JsonDataSource {
             .map(|entry| entry.path())
             .filter(|entry| entry.is_file())
             .filter(|entry| entry.extension().unwrap_or_default() == "json")
-            .filter_map(|file| file.file_stem()
-                .and_then(std::ffi::OsStr::to_str)
-                .filter(|file_name| file_name.starts_with(&filter) || *file_name == name)
-                //.filter(|file_name| !file_name.contains("schema"))
-                .map(|file_name| 
-                    (
-                        file_name
-                            .eq(name).then_some("meta")
-                            .or(file_name.eq(".schema").then_some("schema"))
-                            .unwrap_or(file_name.trim_start_matches(&filter))
-                            .to_string(), 
-                        
-                        read_json_file(&file)
-                            .unwrap_or_exit(format!("Failed to parse data from json file: {file:?}"))
-                    )
-                )
-            )
+            .filter_map(|file| {
+                file.file_stem()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .filter(|file_name| file_name.starts_with(&filter) || *file_name == name)
+                    //.filter(|file_name| !file_name.contains("schema"))
+                    .map(|file_name| {
+                        (
+                            file_name
+                                .eq(name)
+                                .then_some("meta")
+                                .or(file_name.eq(".schema").then_some("schema"))
+                                .unwrap_or(file_name.trim_start_matches(&filter))
+                                .to_string(),
+                            read_json_file(&file).unwrap_or_exit(format!(
+                                "Failed to parse data from json file: {file:?}"
+                            )),
+                        )
+                    })
+            })
             .collect::<HashMap<String, Value>>();
         data.insert("name".into(), json!(name));
         // dbg!(data.clone());
@@ -59,12 +62,11 @@ impl DataSource for JsonDataSource {
     }
 
     fn get_all_data(&self) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
-        let data = self.get_all_names()
+        let data = self
+            .get_all_names()
             .unwrap_or_exit(format!("Can't read data folder: {:?}", self.path))
             .iter()
-            .map(|dim_name| 
-                self.get_data_by_name(dim_name).unwrap_or_default()
-            )
+            .map(|dim_name| self.get_data_by_name(dim_name).unwrap_or_default())
             .collect::<Vec<Value>>();
 
         Ok(data)
@@ -77,13 +79,15 @@ impl DataSource for JsonDataSource {
             .map(|entry| entry.path())
             .filter(|entry| entry.is_file())
             .filter(|entry| entry.extension().unwrap_or_default() == "json")
-            .filter_map(|file| file.file_stem()
-                .and_then(std::ffi::OsStr::to_str)
-                .filter(|filename| !filename.starts_with('.'))
-                .filter(|filename| !filename.contains(':') || filename.contains(":meta"))
-                .filter(|filename| !filename.contains("schema"))
-                .map(|filename| filename.trim_end_matches(":meta").to_string())
-            ).collect::<Vec<String>>();
+            .filter_map(|file| {
+                file.file_stem()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .filter(|filename| !filename.starts_with('.'))
+                    .filter(|filename| !filename.contains(':') || filename.contains(":meta"))
+                    .filter(|filename| !filename.contains("schema"))
+                    .map(|filename| filename.trim_end_matches(":meta").to_string())
+            })
+            .collect::<Vec<String>>();
 
         Ok(names)
     }
@@ -182,8 +186,14 @@ mod tests {
 
         let data_source = JsonDataSource::new(org, dim_type, dir.path().to_str().unwrap());
         let result = data_source.get_all_data().unwrap();
-        let names = result.iter().map(|v| v["name"].as_str().unwrap()).collect::<Vec<&str>>();
-        let meta = result.iter().map(|v| v["meta"].clone()).collect::<Vec<Value>>();
+        let names = result
+            .iter()
+            .map(|v| v["name"].as_str().unwrap())
+            .collect::<Vec<&str>>();
+        let meta = result
+            .iter()
+            .map(|v| v["meta"].clone())
+            .collect::<Vec<Value>>();
 
         assert_eq!(result.len(), 2);
         assert!(names.contains(&name1));

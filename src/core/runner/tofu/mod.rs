@@ -1,13 +1,13 @@
-use std::error::Error;
 use serde_json::Value;
+use std::error::Error;
 
 use crate::prelude::*;
 
-use super::{Runner, RunnerLoad};
 use super::tf::TfRunner;
+use super::{Runner, RunnerLoad};
 
 pub struct TofuRunner {
-    inner: TfRunner
+    inner: TfRunner,
 }
 
 impl TofuRunner {}
@@ -17,15 +17,16 @@ impl Runner for TofuRunner {
         // let ctx = Value::Object(serde_json::Map::new());
 
         match load.params.runner_command {
-            Some(_) => TofuRunner{inner: TfRunner::new(load)},
-            _ => exit_with_error("OpenTofu runner command is not defined".to_string())
+            Some(_) => TofuRunner {
+                inner: TfRunner::new(load),
+            },
+            _ => exit_with_error("OpenTofu runner command is not defined".to_string()),
         }
     }
 
     fn get_load(&self) -> &RunnerLoad {
         self.inner.get_load()
     }
-
 
     fn get_ctx(&self) -> &Value {
         self.inner.get_ctx()
