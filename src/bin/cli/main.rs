@@ -1,4 +1,3 @@
-#![warn(clippy::all, clippy::pedantic)]
 #![allow(dead_code, unused_variables)]
 
 mod cmd;

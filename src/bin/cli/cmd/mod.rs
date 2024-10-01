@@ -73,7 +73,7 @@ pub fn get_args() -> CliResult<Cli> {
     })
 }
 
-//#[allow(clippy::unnecessary_wraps)]
+#[allow(clippy::unnecessary_wraps)]
 pub fn run(cli: Cli) -> CliResult<()> {
     (cli.executor)(&cli.subcommand, &cli.storage);
     Ok(())

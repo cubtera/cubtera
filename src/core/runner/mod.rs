@@ -184,9 +184,12 @@ impl RunnerBuilder {
                 params.extend(config_runner_params.clone());
 
                 // check if state type is defined in global config and overwrite default
-                config_runner_params
-                    .get("state_backend")
-                    .map(|s| state_type = s);
+                if let Some(state) = config_runner_params.get("state_backend") {
+                    state_type = state;
+                }
+                // config_runner_params
+                //     .get("state_backend")
+                //     .map(|s| state_type = s);
             }
         }
 
@@ -195,9 +198,12 @@ impl RunnerBuilder {
             params.extend(manifest_runner_params.clone());
 
             // check if state type is defined in unit manifest and overwrite global config
-            manifest_runner_params
-                .get("state_backend")
-                .map(|s| state_type = s);
+            if let Some(state) = manifest_runner_params.get("state_backend") {
+                state_type = state;
+            }
+            // manifest_runner_params
+            //     .get("state_backend")
+            //     .map(|s| state_type = s);
         }
 
         if state_type.is_empty() {
@@ -206,11 +212,16 @@ impl RunnerBuilder {
         }
 
         // check if state type is defined in global config
-        GLOBAL_CFG
-            .clone()
-            .state
-            .and_then(|s| s.get(state_type).cloned())
-            .map(|s| state_backend = json!(s));
+        if let Some(s) = GLOBAL_CFG.clone().state
+            .and_then(|s| s.get(state_type).cloned()){
+            state_backend = json!(s);
+        }
+        
+        // GLOBAL_CFG
+        //     .clone()
+        //     .state
+        //     .and_then(|s| s.get(state_type).cloned())
+        //     .map(|s| state_backend = json!(s));
 
         // check if state type is defined in unit manifest
         if let Some(state) = &self.unit.manifest.state {

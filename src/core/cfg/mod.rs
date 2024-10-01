@@ -191,27 +191,11 @@ impl CubteraConfig {
             .get("config")
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .map(|s| convert_path_to_absolute(s.clone()).unwrap_or(s.clone()))
-            // .cloned()
             .unwrap_or_else(|| {
                 let path = "~/.cubtera/config.toml";
                 warn!(target: "cfg", "CUBTERA_CONFIG is not provided. Using: {}", path.blue());
-                let full_path = convert_path_to_absolute(path.to_string()).unwrap_or_default();
-                // path.replace('~', &std::env::var("HOME").unwrap_or_default());
-
-                // if !Path::new(&full_path).exists() {
-                //     warn!(target: "cfg", "Create default config file: {}", path.blue());
-                //
-                //     let value = self.get_values().unwrap_or_default();
-                //     let value = serde_json::json!({ "default": value });
-                //     let toml_str = toml::to_string_pretty(&value).unwrap();
-                //
-                //     std::fs::create_dir_all(Path::new(&full_path).parent().unwrap())
-                //         .unwrap_or_exit(format!("Failed to create folders for file {}", path));
-                //     std::fs::write(&full_path, toml_str)
-                //         .unwrap_or_exit(format!("Failed to write config file {}", path));
-                // }
-
-                full_path
+                
+                convert_path_to_absolute(path.to_string()).unwrap_or_default()
             });
 
         // Read settings from config file (TOML) if it exists and provided in env vars
@@ -243,6 +227,7 @@ impl CubteraConfig {
         // extend with override default section with org section from config file
         config.extend(cfg_file.get(&org).cloned().unwrap_or_default());
         // extend with override default and org sections with env vars values
+        #[allow(clippy::map_identity)]
         config.extend(
             cfg_env_vars
                 .into_iter()
@@ -329,6 +314,7 @@ where
 
 use serde::Serializer;
 
+#[allow(clippy::ptr_arg)]
 fn serialize_colon_list<S>(list: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,

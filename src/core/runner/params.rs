@@ -20,6 +20,7 @@ pub struct RunnerParams {
     pub lock_port: String,
 }
 
+#[allow(dead_code)]
 impl RunnerParams {
     pub fn init(params: HashMap<String, String>) -> Self {
         let value =

@@ -93,6 +93,7 @@ impl Runner for TfRunner {
             .collect::<Vec<std::path::PathBuf>>();
 
         // for each file read json as value and create list of root keys
+        #[allow(clippy::format_collect)]
         if !files.is_empty() {
             let dim_tf_variables: String = files
                 .iter()
