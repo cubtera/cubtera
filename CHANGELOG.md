@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.5](https://github.com/cubtera/cubtera/compare/v1.0.4...v1.0.5) (2024-10-02)
+
+
+### Bug Fixes
+
+* deprecated methods for json schema validator ([f0db236](https://github.com/cubtera/cubtera/commit/f0db236a24ec46e9bef0cd25233b85eca026d64a))
+* remove release-please failed configuration ([aeade6f](https://github.com/cubtera/cubtera/commit/aeade6f783a525ac30fda78be4c8d81817e84b22))
+* rollback release-please ([25f3160](https://github.com/cubtera/cubtera/commit/25f3160c2aa57aa1c2a09892ddd8215754b381cd))
+
 ## [1.0.4](https://github.com/cubtera/cubtera/compare/v1.0.3...v1.0.4) (2024-09-18)
 
 
