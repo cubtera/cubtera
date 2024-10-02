@@ -1,6 +1,6 @@
-use anyhow::{Result, Context};
-use std::collections::HashMap;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,7 +22,9 @@ pub struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec: Option<Spec>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runner: Option<HashMap<String, String>>
+    pub runner: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<HashMap<String, String>>,
 }
 
 impl Manifest {
@@ -33,7 +35,6 @@ impl Manifest {
                 .context(format!("Failed to read unit manifest at {:?}", toml_path))?;
             toml::from_str::<Manifest>(&toml)
                 .context(format!("Failed to parse manifest at {:?}", toml_path))
-
         } else {
             //TODO: Remove legacy manifest in future versions
             let json_path = path.join("unit_manifest.json");
@@ -79,4 +80,3 @@ pub struct Files {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<HashMap<String, String>>,
 }
-

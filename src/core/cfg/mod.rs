@@ -1,15 +1,13 @@
-use crate::utils::helper::*;
 use crate::prelude::*;
+use crate::utils::helper::*;
+use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::ops::Add;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use once_cell::sync::Lazy;
-
 
 pub static GLOBAL_CFG: Lazy<CubteraConfig> = Lazy::new(|| CubteraConfig::new().build());
-
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CubteraConfig {
@@ -31,9 +29,17 @@ pub struct CubteraConfig {
     pub tf_state_s3bucket: String,
     #[serde(default = "default_tf_state_s3region")]
     pub tf_state_s3region: String,
-    #[serde(deserialize_with = "deserialize_colon_list", serialize_with="serialize_colon_list", default="default_orgs")]
+    #[serde(
+        deserialize_with = "deserialize_colon_list",
+        serialize_with = "serialize_colon_list",
+        default = "default_orgs"
+    )]
     pub orgs: Vec<String>,
-    #[serde(deserialize_with = "deserialize_colon_list", serialize_with="serialize_colon_list", default="default_dim_relations")]
+    #[serde(
+        deserialize_with = "deserialize_colon_list",
+        serialize_with = "serialize_colon_list",
+        default = "default_dim_relations"
+    )]
     pub dim_relations: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tf_state_key_prefix: Option<String>,
@@ -53,39 +59,63 @@ pub struct CubteraConfig {
     pub always_copy_files: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner: Option<HashMap<String, HashMap<String, String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<HashMap<String, HashMap<String, String>>>,
     #[serde(skip)]
     pub db_client: Option<mongodb::sync::Client>,
 }
 
-fn default_workspace_path() -> String { "~/.cubtera/workspace".into() }
-fn default_temp_folder_path() -> String { "~/.cubtera/tmp".into() }
-
-fn default_units_folder() -> String { "units".into() }
-fn default_units_path() -> String { default_workspace_path()
-    .add(&format!("/{}",default_units_folder()))
+fn default_workspace_path() -> String {
+    "~/.cubtera/workspace".into()
+}
+fn default_temp_folder_path() -> String {
+    "~/.cubtera/tmp".into()
 }
 
-fn default_modules_folder() -> String { "modules".into() }
-fn default_modules_path() -> String { default_workspace_path()
-    .add(&format!("/{}",default_modules_folder()))
+fn default_units_folder() -> String {
+    "units".into()
+}
+fn default_units_path() -> String {
+    default_workspace_path().add(&format!("/{}", default_units_folder()))
 }
 
-fn default_plugins_folder() -> String { "plugins".into() }
-fn default_plugins_path() -> String { default_workspace_path()
-    .add(&format!("/{}",default_plugins_folder()))
+fn default_modules_folder() -> String {
+    "modules".into()
+}
+fn default_modules_path() -> String {
+    default_workspace_path().add(&format!("/{}", default_modules_folder()))
 }
 
-fn default_inventory_folder() -> String { "inventory".into() }
-fn default_inventory_path() -> String { default_workspace_path()
-    .add(&format!("/{}",default_inventory_folder()))
+fn default_plugins_folder() -> String {
+    "plugins".into()
+}
+fn default_plugins_path() -> String {
+    default_workspace_path().add(&format!("/{}", default_plugins_folder()))
 }
 
-fn default_dim_relations() -> Vec<String> { ["dome".into(), "env".into(), "dc".into()].into() }
-fn default_orgs() -> Vec<String> { ["cubtera".into()].into() }
-fn default_org() -> String { "cubtera".into() }
+fn default_inventory_folder() -> String {
+    "inventory".into()
+}
+fn default_inventory_path() -> String {
+    default_workspace_path().add(&format!("/{}", default_inventory_folder()))
+}
 
-fn default_tf_state_s3bucket() -> String { "cubtera_state_bucket".to_string() }
-fn default_tf_state_s3region() -> String { "us-east-1".to_string() }
+fn default_dim_relations() -> Vec<String> {
+    ["dome".into(), "env".into(), "dc".into()].into()
+}
+fn default_orgs() -> Vec<String> {
+    ["cubtera".into()].into()
+}
+fn default_org() -> String {
+    "cubtera".into()
+}
+
+fn default_tf_state_s3bucket() -> String {
+    "cubtera_state_bucket".to_string()
+}
+fn default_tf_state_s3region() -> String {
+    "us-east-1".to_string()
+}
 
 impl Default for CubteraConfig {
     fn default() -> Self {
@@ -112,6 +142,7 @@ impl Default for CubteraConfig {
             clean_cache: false,
             always_copy_files: true,
             runner: None,
+            state: None,
             db_client: None,
         }
     }
@@ -126,84 +157,93 @@ impl CubteraConfig {
 impl CubteraConfig {
     pub fn build(self) -> Self {
         // read all CUBTERA_* env vars overrides
+
         let cfg_env_vars = config::Config::builder()
             .add_source(
                 config::Environment::with_prefix("CUBTERA")
                     .ignore_empty(true)
-                // .prefix_separator("_")
-                // .separator("__"),
-                // .try_parsing(true)
-                // .list_separator(",")
-                // .with_list_parse_key("DB")
+                    .prefix_separator("_")
+                    .separator("__"), //.try_parsing(true)
             )
             .build()
             .unwrap_or_exit("Failed to read env vars".to_string())
-            .try_deserialize::<HashMap<String, String>>()
+            .try_deserialize::<HashMap<String, Value>>()
             .unwrap_or_exit("Failed to deserialize env vars".to_string());
+
+        //
+        // let cfg_env_vars = config::Config::builder()
+        //     .add_source(
+        //         config::Environment::with_prefix("CUBTERA")
+        //             .ignore_empty(true)
+        //             //.prefix_separator("_")
+        //             // .separator("__"),
+        //             // .try_parsing(true)
+        //             // .list_separator(",")
+        //             // .with_list_parse_key("DB")
+        //     )
+        //     .build()
+        //     .unwrap_or_exit("Failed to read env vars".to_string())
+        //     .try_deserialize::<HashMap<String, String>>()
+        //     .unwrap_or_exit("Failed to deserialize env vars".to_string());
 
         // read config file path from env vars
         let cfg_file_path = cfg_env_vars
             .get("config")
-            .cloned()
-            .unwrap_or_else(||{
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .map(|s| convert_path_to_absolute(s.clone()).unwrap_or(s.clone()))
+            .unwrap_or_else(|| {
                 let path = "~/.cubtera/config.toml";
                 warn!(target: "cfg", "CUBTERA_CONFIG is not provided. Using: {}", path.blue());
-                let full_path = path.replace('~', &std::env::var("HOME").unwrap_or_default());
-
-                // if !Path::new(&full_path).exists() {
-                //     warn!(target: "cfg", "Create default config file: {}", path.blue());
-                //
-                //     let value = self.get_values().unwrap_or_default();
-                //     let value = serde_json::json!({ "default": value });
-                //     let toml_str = toml::to_string_pretty(&value).unwrap();
-                //
-                //     std::fs::create_dir_all(Path::new(&full_path).parent().unwrap())
-                //         .unwrap_or_exit(format!("Failed to create folders for file {}", path));
-                //     std::fs::write(&full_path, toml_str)
-                //         .unwrap_or_exit(format!("Failed to write config file {}", path));
-                // }
-
-                full_path
+                
+                convert_path_to_absolute(path.to_string()).unwrap_or_default()
             });
-
-
 
         // Read settings from config file (TOML) if it exists and provided in env vars
         let cfg_file = config::Config::builder()
             .add_source(config::File::from(Path::new(&cfg_file_path)))
             .build()
-            .and_then(| cfg | cfg.try_deserialize::<HashMap<String, HashMap<String, Value>>>())
+            .and_then(|cfg| cfg.try_deserialize::<HashMap<String, HashMap<String, Value>>>())
+            .check_with_warn("Failed to read config file")
             .unwrap_or_default();
 
-            // .unwrap_or_else(|e|{
-            //     debug!("Using default config. Failed to read config file {}: {}", cfg_file_path, e);
-            //     config::Config::default()
-            // })
-            // .try_deserialize::<HashMap<String, HashMap<String, Value>>>()
-            // .unwrap_or_exit("Failed to deserialize config file".to_string());
+        // .unwrap_or_else(|e|{
+        //     debug!("Using default config. Failed to read config file {}: {}", cfg_file_path, e);
+        //     config::Config::default()
+        // })
+        // .try_deserialize::<HashMap<String, HashMap<String, Value>>>()
+        // .unwrap_or_exit("Failed to deserialize config file".to_string());
 
         // read default section from config file
         let mut config = cfg_file.get("default").cloned().unwrap_or_default();
-        let org = cfg_env_vars.get("org").cloned().unwrap_or_else(||{
-            warn!(target: "cfg", "CUBTERA_ORG is not provided. Using: {}", "cubtera".blue());
-            "cubtera".to_string()
-        });
+        let org = cfg_env_vars
+            .get("org")
+            .cloned()
+            .map(|v| v.as_str().unwrap().to_string())
+            .unwrap_or_else(|| {
+                warn!(target: "cfg", "CUBTERA_ORG is not provided. Using: {}", "cubtera".blue());
+                "cubtera".to_string()
+            });
 
         // extend with override default section with org section from config file
         config.extend(cfg_file.get(&org).cloned().unwrap_or_default());
         // extend with override default and org sections with env vars values
-        config.extend(cfg_env_vars.into_iter()
-            .map(|(key, value)| (key, Value::String(value)))
-            .collect::<HashMap<String, Value>>());
+        #[allow(clippy::map_identity)]
+        config.extend(
+            cfg_env_vars
+                .into_iter()
+                .map(|(key, value)| (key, value))
+                .collect::<HashMap<String, Value>>(),
+        );
 
         if config.is_empty() {
             warn!(target: "cfg", "Config is not provided. Using default values");
-            return self
+            return self;
         }
         // deserialize config to CubteraConfig struct
         let config_value = serde_json::to_value(&config).unwrap();
 
-        let mut cfg = serde_json::from_value::<CubteraConfig>(config_value).unwrap_or_exit("Failed to deserialize config".to_string());
+        let mut cfg = serde_json::from_value::<CubteraConfig>(config_value)
+            .unwrap_or_exit("Failed to deserialize config".to_string());
 
         // set paths if not provided in config file or env vars
         cfg.modules_path = cfg.define_path(config.clone(), "modules");
@@ -219,21 +259,21 @@ impl CubteraConfig {
     }
 
     fn define_path(&self, config: HashMap<String, Value>, path_type: &str) -> String {
-        config.get(&format!("{}_path", path_type))
+        config
+            .get(&format!("{}_path", path_type))
             .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .unwrap_or_else(||{
+            .unwrap_or_else(|| {
                 self.workspace_path.clone().add("/").add(
-                    &config.contains_key(&format!("{}_folder", path_type))
+                    &config
+                        .contains_key(&format!("{}_folder", path_type))
                         .then(|| format!("{}/", path_type))
-                        .unwrap_or_else(|| {
-                            match path_type {
-                                "plugins" => default_plugins_folder(),
-                                "modules" => default_modules_folder(),
-                                "units" => default_units_folder(),
-                                "inventory" => default_inventory_folder(),
-                                _ => "".into(),
-                            }
-                        })
+                        .unwrap_or_else(|| match path_type {
+                            "plugins" => default_plugins_folder(),
+                            "modules" => default_modules_folder(),
+                            "units" => default_units_folder(),
+                            "inventory" => default_inventory_folder(),
+                            _ => "".into(),
+                        }),
                 )
             })
     }
@@ -247,7 +287,9 @@ impl CubteraConfig {
     }
 
     pub fn get_runner_by_type(&self, runner_type: &str) -> Option<HashMap<String, String>> {
-        self.runner.clone().and_then(|r| r.get(runner_type).cloned())
+        self.runner
+            .clone()
+            .and_then(|r| r.get(runner_type).cloned())
     }
 
     pub fn get_json(&self) -> String {
@@ -272,6 +314,7 @@ where
 
 use serde::Serializer;
 
+#[allow(clippy::ptr_arg)]
 fn serialize_colon_list<S>(list: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,

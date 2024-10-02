@@ -7,8 +7,7 @@ pub fn get_command() -> Command {
     Command::new("log")
         .about("Unit deployment log commands")
         .subcommand_required(true)
-        .subcommands([
-            Command::new("get")
+        .subcommands([Command::new("get")
             .about("Get logs of unit deployments")
             .args([
                 Arg::new("query")
@@ -26,9 +25,8 @@ pub fn get_command() -> Command {
                     .value_name("limit")
                     .help("limit of returned logs")
                     .required(false)
-                    .number_of_values(1)
-            ])
-        ])
+                    .number_of_values(1),
+            ])])
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -44,11 +42,12 @@ pub fn run(subcommand: &ArgMatches, _: &Storage) {
 
             let limit = matches
                 .get_one::<String>("limit")
-                .unwrap_or(&"10".to_string()).parse().unwrap_or(10);
+                .unwrap_or(&"10".to_string())
+                .parse()
+                .unwrap_or(10);
             let res = get_dlog_by_keys(&GLOBAL_CFG.org, keys.to_vec(), Some(limit));
-            println!("{}", res);
-
+            println!("{res}");
         }
-        _ => unreachable!()
+        _ => unreachable!(),
     }
 }

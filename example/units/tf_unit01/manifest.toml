@@ -1,0 +1,11 @@
+dimensions = ["dome"]
+allowList = ["mgmt", "stg"]
+type = "tofu"
+
+[runner]
+state_backend = "local" # state backend for the runner defined in config.toml, default is local
+runner_command =  "~/Downloads/tofu/tofu" # if defined - version will be ignored
+
+# extra_args = "--auto-approve" # default => None | extra arguments for the runner_command
+inlet_command = "~/Downloads/tofu/tofu version" # default => None, will run command before runner_command starts, in temp folder context
+# outlet_command = "" # default => None, will run command after runner_command finishes successfully, in temp folder context

@@ -1,0 +1,5 @@
+{
+    "parent": "env:prod",
+    "region": "us-east-2",
+    "vpc_cidr": "10.12.0.0/16"
+}

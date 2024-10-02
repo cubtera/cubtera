@@ -3,11 +3,10 @@
 use crate::prelude::*;
 use crate::utils::helper::*;
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dlog {
@@ -48,12 +47,12 @@ impl Dlog {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let hr_time = chrono::DateTime::from_timestamp(timestamp as i64, 0)
-            .unwrap_or_default();
+        let hr_time = chrono::DateTime::from_timestamp(timestamp as i64, 0).unwrap_or_default();
         let state_path = unit.get_unit_state_path();
-        let dims: HashMap<String, String> = state_path.split('/')
+        let dims: HashMap<String, String> = state_path
+            .split('/')
             .map(Into::into)
-            .map(|dim:String| {
+            .map(|dim: String| {
                 let parts: Vec<&str> = dim.split(':').collect();
                 (parts[0].to_string(), parts[1].to_string())
             })
@@ -61,14 +60,20 @@ impl Dlog {
 
         // try to get names of env vars from config or use default values
         // useful for CI/CD system job (Jenkins, Gitlab CI, etc.)
-        let job_user_name = GLOBAL_CFG.dlog_job_user_name_env.clone()
+        let job_user_name = GLOBAL_CFG
+            .dlog_job_user_name_env
+            .clone()
             .and_then(|var| std::env::var(var).ok())
             .or(whoami::username().into())
             .unwrap_or("undefined".into());
-        let job_build_number = GLOBAL_CFG.dlog_job_number_env.clone()
+        let job_build_number = GLOBAL_CFG
+            .dlog_job_number_env
+            .clone()
             .and_then(|var| std::env::var(var).ok())
             .unwrap_or("0".to_string());
-        let job_name = GLOBAL_CFG.dlog_job_name_env.clone()
+        let job_name = GLOBAL_CFG
+            .dlog_job_name_env
+            .clone()
             .and_then(|var| std::env::var(var).ok())
             .unwrap_or("undefined".into());
 
@@ -82,8 +87,12 @@ impl Dlog {
             job_name: Some(job_name),
             tf_command: Some(tf_command),
             exitcode: Some(exitcode),
-            unit_sha: Some(git_sha_by_path(Path::new(&GLOBAL_CFG.units_path).to_path_buf())),
-            inventory_sha: Some(git_sha_by_path(Path::new(&GLOBAL_CFG.inventory_path).to_path_buf())),
+            unit_sha: Some(git_sha_by_path(
+                Path::new(&GLOBAL_CFG.units_path).to_path_buf(),
+            )),
+            inventory_sha: Some(git_sha_by_path(
+                Path::new(&GLOBAL_CFG.inventory_path).to_path_buf(),
+            )),
             timestamp: Some(timestamp),
             datetime: Some(hr_time.to_string()),
             extended_log: get_extended_log(),
@@ -100,7 +109,8 @@ impl Dlog {
     ///
     /// Returns `Ok(())` if the log entry was successfully inserted, otherwise returns an `anyhow::Error`.
     pub fn put(&self, org: &str) -> anyhow::Result<()> {
-        let client: Option<mongodb::sync::Client> = GLOBAL_CFG.dlog_db.as_ref().map(|db| db_connect(db));
+        let client: Option<mongodb::sync::Client> =
+            GLOBAL_CFG.dlog_db.as_ref().map(|db| db_connect(db));
         if let Some(cl) = client {
             let db = cl.database(org);
             let col = db.collection::<mongodb::bson::Bson>("dlog");
@@ -108,11 +118,10 @@ impl Dlog {
             let data = serde_json::json!(self);
             let doc = mongodb::bson::to_bson(&data)?;
             col.insert_one(doc, None)?;
-            return Ok(())
+            return Ok(());
         }
         anyhow::bail!("Can't connect to dLog DB");
     }
-
 }
 
 /// Reads extended log data from standard input and returns it as a JSON value.
@@ -122,15 +131,17 @@ impl Dlog {
 /// An `Option` containing the JSON value if the standard input is not a terminal, otherwise `None`.
 fn get_extended_log() -> Option<HashMap<String, String>> {
     use std::io::Read;
-    if unsafe { libc::isatty( libc::STDIN_FILENO) == 0 } {
+    if unsafe { libc::isatty(libc::STDIN_FILENO) == 0 } {
         let mut buffer = String::new();
-        std::io::stdin().read_to_string(&mut buffer).unwrap_or_default();
+        std::io::stdin()
+            .read_to_string(&mut buffer)
+            .unwrap_or_default();
         let buffer = buffer.trim().replace('\n', " ");
         let log_data: Value = serde_json::from_str(&buffer)
             .check_with_warn("Skip extended log data. Broken JSON")
             .unwrap_or_default();
         let extended_log: Option<HashMap<String, String>> = serde_json::from_value(log_data).ok();
-        return extended_log
+        return extended_log;
     }
     None
 }

@@ -1,0 +1,12 @@
+{
+    "cmd": "node run admin",
+    "description": "Admin Service",
+    "prod": {
+        "min_capacity": 2,
+        "max_capacity": 3
+    },
+    "stg": {
+        "min_capacity": 1,
+        "max_capacity": 1
+    }
+}

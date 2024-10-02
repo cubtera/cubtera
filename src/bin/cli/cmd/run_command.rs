@@ -1,11 +1,11 @@
-use cubtera::prelude::*;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use cubtera::core::dim::data::Storage;
+use cubtera::prelude::*;
 
 pub fn get_command() -> Command {
     Command::new("run")
         .alias("tf")
-        .about("Run terraform unit with dimension values")
+        .about("Run unit with dimension's values")
         .arg(
             Arg::new("dim")
                 .action(ArgAction::Append)
@@ -21,7 +21,7 @@ pub fn get_command() -> Command {
             Arg::new("ext")
                 .action(ArgAction::Append)
                 .help("Extension type and name (opt)")
-                .long_help("Extension type and name (opt)\nUsed for run a unit with the same dimensions but with different states\nExample: -e index:0")
+                .long_help("Extension type and name (opt)\nUsed for run a unit with the same dimensions but different states\nExample: -e index:0")
                 .short('e')
                 .long("ext")
                 .value_name("ext_type:ext_name")
@@ -40,7 +40,7 @@ pub fn get_command() -> Command {
         )
         .arg(
             Arg::new("context")
-                .help("Context")
+                .help("Context (opt), advanced feature, see docs for more info.")
                 .value_name("context")
                 .required(false)
                 .short('c')
@@ -49,7 +49,7 @@ pub fn get_command() -> Command {
         .arg(
             Arg::new("command")
                 .last(true)
-                .help("Terraform command")
+                .help("Runner command (opt)")
                 .required(false)
                 .action(ArgAction::Append)
                 .allow_hyphen_values(true)
@@ -72,7 +72,7 @@ pub fn run(sub_matches: &ArgMatches, storage: &Storage) {
         .unwrap_or_default()
         .map(std::string::ToString::to_string)
         .collect::<Vec<String>>();
-        // .join(" ");
+    // .join(" ");
 
     let context = sub_matches.get_one::<String>("context").cloned();
 
@@ -85,9 +85,12 @@ pub fn run(sub_matches: &ArgMatches, storage: &Storage) {
     let extensions = extensions.as_slice();
     let unit = Unit::new(unit_name, dimensions, extensions, storage, context).build();
 
-    let runner = RunnerBuilder::new(unit, command).build();
-    runner.init()
-        .unwrap_or_exit("Failed to init runner".to_string());
-    runner.run()
-        .unwrap_or_exit("Failed to run unit".to_string());
+    let res = RunnerBuilder::new(unit, command)
+        .build()
+        .run()
+        .unwrap_or_exit("Unit runner failed".to_string());
+
+    let exit_code = res["exit_code"].as_i64().unwrap_or(0);
+    #[allow(clippy::cast_possible_truncation)]
+    std::process::exit(exit_code as i32);
 }

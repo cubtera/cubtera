@@ -1,0 +1,5 @@
+{
+    "parent": "env:stg2",
+    "region": "eu-west-1",
+    "vpc_cidr": "10.22.0.0/16"
+}

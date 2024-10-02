@@ -1,5 +1,5 @@
-use cubtera::prelude::*;
 use cubtera::core::dim::data::Storage;
+use cubtera::prelude::*;
 
 use clap::{command, ArgMatches};
 mod im_command;
@@ -19,11 +19,7 @@ pub fn get_matches() -> ArgMatches {
         .subcommand(im_command::get_command())
         .subcommand(log_command::get_command())
         .subcommand(run_command::get_command())
-        .subcommand(
-            command!("config")
-                .about("Show configuration")
-                .alias("cfg")
-        )
+        .subcommand(command!("config").about("Show configuration").alias("cfg"))
         .get_matches()
 }
 
@@ -54,12 +50,6 @@ pub fn get_args() -> CliResult<Cli> {
     };
 
     Ok(match matches.subcommand() {
-        // legacy command support
-        Some(("tf", sub_matches)) => Cli {
-            subcommand: sub_matches.clone(),
-            executor: run_command::run,
-            storage,
-        },
         Some(("im", sub_matches)) => Cli {
             subcommand: sub_matches.clone(),
             executor: im_command::run,
@@ -70,7 +60,7 @@ pub fn get_args() -> CliResult<Cli> {
             executor: log_command::run,
             storage,
         },
-        Some(("run", sub_matches)) => Cli {
+        Some(("run" | "tf", sub_matches)) => Cli {
             subcommand: sub_matches.clone(),
             executor: run_command::run,
             storage,
@@ -83,7 +73,7 @@ pub fn get_args() -> CliResult<Cli> {
     })
 }
 
-//#[allow(clippy::unnecessary_wraps)]
+#[allow(clippy::unnecessary_wraps)]
 pub fn run(cli: Cli) -> CliResult<()> {
     (cli.executor)(&cli.subcommand, &cli.storage);
     Ok(())
