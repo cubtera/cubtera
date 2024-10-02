@@ -1,8 +1,7 @@
-use std::collections::HashMap;
-use serde_json::Value;
-use std::path::{Path, PathBuf};
 use log::{debug, error, warn};
-
+use serde_json::Value;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 pub fn db_connect(db: &str) -> mongodb::sync::Client {
     let options = match mongodb::options::ClientOptions::parse(db) {
@@ -17,9 +16,9 @@ pub fn db_connect(db: &str) -> mongodb::sync::Client {
 }
 
 /// Exits the program with an error message and a status code of 1.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `error` - A string slice that holds the error message to be logged.
 #[allow(clippy::needless_pass_by_value)]
 pub fn exit_with_error(error: String) -> ! {
@@ -76,24 +75,32 @@ impl<T> OptionExtUnwrap<T> for Option<T> {
     }
 }
 
-
 pub fn convert_path_to_absolute(s: String) -> Option<String> {
-    s.starts_with('~').then(|| s.replacen("~", &std::env::var("HOME").unwrap(),1))
-        .or(s.starts_with('.').then(|| s.replacen(".", &std::env::var("PWD").unwrap(),1)))
+    s.starts_with('~')
+        .then(|| s.replacen("~", &std::env::var("HOME").unwrap(), 1))
+        .or(s
+            .starts_with('.')
+            .then(|| s.replacen(".", &std::env::var("PWD").unwrap(), 1)))
         .or(s.starts_with('/').then(|| s.clone()))
-        .or(Path::new(&s).is_relative()
-            .then(|| std::env::current_dir().unwrap().join(&s).to_str().unwrap().to_string()))
+        .or(Path::new(&s).is_relative().then(|| {
+            std::env::current_dir()
+                .unwrap()
+                .join(&s)
+                .to_str()
+                .unwrap()
+                .to_string()
+        }))
 }
 
 /// Reads a JSON file from the given path and returns its content as a `serde_json::Value` object.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `path` - A `PathBuf` object representing the path to the JSON file.
-/// 
+///
 /// # Returns
-/// 
-/// An `Option` containing the `serde_json::Value` object if the file exists and is a valid JSON file, 
+///
+/// An `Option` containing the `serde_json::Value` object if the file exists and is a valid JSON file,
 /// otherwise `None`.
 pub fn read_json_file(path: &PathBuf) -> Option<Value> {
     match std::fs::read_to_string(path) {
@@ -173,7 +180,8 @@ pub fn read_json_file(path: &PathBuf) -> Option<Value> {
 //     }
 // }
 pub fn merge_values(data: &mut serde_json::Value, with: &serde_json::Value) {
-    if let (serde_json::Value::Object(data_obj), serde_json::Value::Object(with_obj)) = (data, with) {
+    if let (serde_json::Value::Object(data_obj), serde_json::Value::Object(with_obj)) = (data, with)
+    {
         for (key, with_value) in with_obj {
             if let serde_json::map::Entry::Vacant(entry) = data_obj.entry(key) {
                 entry.insert(with_value.clone());
@@ -187,6 +195,8 @@ pub fn merge_values(data: &mut serde_json::Value, with: &serde_json::Value) {
 }
 
 use std::collections::HashSet;
+use std::process::ExitStatus;
+
 pub fn if_intersect(vec1: Vec<String>, vec2: Vec<String>) -> bool {
     let set1: HashSet<String> = vec1.into_iter().collect();
     let set2: HashSet<String> = vec2.into_iter().collect();
@@ -195,9 +205,8 @@ pub fn if_intersect(vec1: Vec<String>, vec2: Vec<String>) -> bool {
 }
 
 pub fn value_intersection(value1: Value, value2: Value) -> Option<HashSet<String>> {
-    let vec1: Option<Vec<String>> = value1.as_array()?.iter().map(|v| v.as_str().map(|s| s.to_string())).collect();
-    let vec2: Option<Vec<String>> = value2.as_array()?.iter().map(|v| v.as_str().map(|s| s.to_string())).collect();
-
+    let vec1 = value_to_vec(&value1);
+    let vec2 = value_to_vec(&value2);
     let set1: HashSet<_> = vec1?.into_iter().collect();
     let set2: HashSet<_> = vec2?.into_iter().collect();
 
@@ -205,7 +214,14 @@ pub fn value_intersection(value1: Value, value2: Value) -> Option<HashSet<String
         set if set.is_empty() => None,
         set => Some(set),
     }
-    //Some(set1.intersection(&set2).cloned().collect())
+}
+
+fn value_to_vec(value: &Value) -> Option<Vec<String>> {
+    value
+        .as_array()?
+        .iter()
+        .map(|v| v.as_str().map(|s| s.to_string()))
+        .collect()
 }
 
 pub fn group_tuples(tuples: Vec<(String, String)>) -> HashMap<String, Vec<String>> {
@@ -318,9 +334,9 @@ pub fn read_and_validate_json(json_path: PathBuf, schema_path: PathBuf) -> Optio
 /// Will panic if there is a problem with files i/o
 /// Copies all files in a folder from the source path to the destination path.
 /// If the destination path does not exist, it will be created.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `src` - A `PathBuf` representing the source folder path.
 /// * `dst` - A reference to a `PathBuf` representing the destination folder path.
 pub fn copy_all_files_in_folder(src: PathBuf, dst: &PathBuf, overwrite_existing: bool) {
@@ -344,9 +360,9 @@ pub fn copy_all_files_in_folder(src: PathBuf, dst: &PathBuf, overwrite_existing:
 }
 
 /// Recursively copies all files and subfolders from the source folder to the destination folder.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `src` - A `PathBuf` representing the source folder to copy from.
 /// * `dst` - A reference to a `PathBuf` representing the destination folder to copy to.
 pub fn copy_folder(src: PathBuf, dst: &PathBuf, overwrite_existing: bool) {
@@ -362,7 +378,7 @@ pub fn copy_folder(src: PathBuf, dst: &PathBuf, overwrite_existing: bool) {
             copy_folder(
                 folder.clone().into_path(),
                 &dst.join(folder.into_path().file_name().unwrap()),
-                overwrite_existing
+                overwrite_existing,
             );
         });
 }
@@ -371,6 +387,70 @@ pub fn check_path(path: PathBuf) -> Option<PathBuf> {
     match std::fs::metadata(&path) {
         Ok(_) => Some(path),
         Err(_) => None,
+    }
+}
+
+pub fn string_to_path(s: &str) -> PathBuf {
+    let mut path = s.to_string();
+
+    // Expand tilde to home directory
+    if path.starts_with("~") {
+        if let Ok(home) = std::env::var("HOME") {
+            path = path.replacen("~", &home, 1);
+        }
+    }
+
+    // Expand relative path to absolute
+    if path.starts_with("./") {
+        if let Ok(pwd) = std::env::var("PWD") {
+            path = path.replacen(".", &pwd, 1);
+        }
+    }
+
+    // Expand environment variables in path string
+    // Replace ${VAR} and $VAR with actual values
+    let with_env = std::env::vars().fold(path, |s, (k, v)| {
+        s.replace(&format!("${}", k), &v)
+            .replace(&format!("${{{}}}", k), &v)
+    });
+
+    // Check if path is relative and convert to absolute
+    // if Path::new(&with_env).is_relative() {
+    //     with_env = std::env::current_dir().unwrap()
+    //         .join(&with_env).to_str().unwrap().to_string();
+    // }
+
+    // Convert to PathBuf
+    PathBuf::from(with_env)
+}
+
+pub fn execute_command(
+    command: &str,
+    current_dir: &str,
+) -> Result<ExitStatus, Box<dyn std::error::Error>> {
+    let mut command = command.split_whitespace();
+    let binary = command.next().unwrap_or_exit("Command is empty".into());
+    let path = string_to_path(binary);
+    let args = command.collect::<Vec<&str>>();
+
+    let mut process = std::process::Command::new(path)
+        .current_dir(current_dir)
+        .args(args)
+        .spawn()?;
+
+    let result = process.wait();
+
+    match result {
+        Ok(status) => Ok(status),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn capitalize_first(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }
 
@@ -448,6 +528,8 @@ fn test_copy_folder() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use std::path::PathBuf;
 
     #[test]
     fn test_merge_values() {
@@ -500,5 +582,84 @@ mod tests {
         });
 
         assert_eq!(target, expected_result);
+    }
+
+    #[test]
+    fn test_simple_path() {
+        assert_eq!(string_to_path("/usr/bin"), PathBuf::from("/usr/bin"));
+    }
+
+    #[test]
+    fn test_tilde_expansion() {
+        let home = env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+        assert_eq!(
+            string_to_path("~/Documents"),
+            PathBuf::from(format!("{}/Documents", home))
+        );
+    }
+
+    #[test]
+    fn test_env_var_expansion() {
+        env::set_var("TEST_VAR", "test_value");
+        assert_eq!(
+            string_to_path("/$TEST_VAR/path"),
+            PathBuf::from("/test_value/path")
+        );
+        assert_eq!(
+            string_to_path("/${TEST_VAR}/path"),
+            PathBuf::from("/test_value/path")
+        );
+    }
+
+    #[test]
+    fn test_multiple_env_vars() {
+        env::set_var("VAR1", "value1");
+        env::set_var("VAR2", "value2");
+        assert_eq!(
+            string_to_path("/$VAR1/$VAR2"),
+            PathBuf::from("/value1/value2")
+        );
+    }
+
+    #[test]
+    fn test_tilde_and_env_var() {
+        let home = env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+        env::set_var("TEST_VAR", "test_value");
+        assert_eq!(
+            string_to_path("~/$TEST_VAR"),
+            PathBuf::from(format!("{}/test_value", home))
+        );
+    }
+
+    #[test]
+    fn test_non_existent_env_var() {
+        assert_eq!(
+            string_to_path("/$NONEXISTENT_VAR/path"),
+            PathBuf::from("/$NONEXISTENT_VAR/path")
+        );
+    }
+
+    #[test]
+    fn test_tilde_in_middle() {
+        assert_eq!(
+            string_to_path("/path/~/other"),
+            PathBuf::from("/path/~/other")
+        );
+    }
+
+    #[test]
+    fn test_empty_string() {
+        assert_eq!(string_to_path(""), PathBuf::from(""));
+    }
+
+    #[test]
+    fn test_complex_path() {
+        env::set_var("USER", "testuser");
+        env::set_var("PROJECT", "myproject");
+        let home = env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+        assert_eq!(
+            string_to_path("~/Documents/${USER}/$PROJECT/src"),
+            PathBuf::from(format!("{}/Documents/testuser/myproject/src", home))
+        );
     }
 }

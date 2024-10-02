@@ -2,16 +2,16 @@ mod manifest;
 use manifest::Manifest;
 
 use serde_json::json;
-use std::collections::HashSet;
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use yansi::Paint;
 
 use crate::globals::GLOBAL_CFG;
-use crate::utils::helper::*;
-use crate::prelude::*;
 use crate::prelude::data::Storage;
+use crate::prelude::*;
+use crate::utils::helper::*;
 
 #[derive(Debug, Clone)]
 pub struct Unit {
@@ -26,18 +26,18 @@ pub struct Unit {
 }
 
 impl Unit {
-    #[must_use]
-    /// # Panics
     pub fn new(
         name: String,
         dimensions: &[String],
         extensions: &[String],
         storage: &Storage,
-        context: Option<String>
+        context: Option<String>,
     ) -> Self {
         // Check if unit exists
         let mut unit_folder = Path::new(&GLOBAL_CFG.units_path).join(&name);
-        let org_unit_folder = Path::new(&GLOBAL_CFG.units_path).join(&GLOBAL_CFG.org).join(&name);
+        let org_unit_folder = Path::new(&GLOBAL_CFG.units_path)
+            .join(&GLOBAL_CFG.org)
+            .join(&name);
 
         let (manifest, generic_unit_folder) = match Manifest::load(&org_unit_folder) {
             Ok(manifest) => {
@@ -47,12 +47,12 @@ impl Unit {
 
                 unit_folder.clone_from(&org_unit_folder);
                 (manifest, generic_unit_folder)
-            },
+            }
             Err(e) => match Manifest::load(&unit_folder) {
                 Ok(manifest) => {
                     debug!(target: "", "Unit {name} can't be load from org folder: {org_unit_folder:?} with error: {e}. Using generic unit from {unit_folder:?}");
                     (manifest, None)
-                },
+                }
                 Err(e) => exit_with_error(format!(
                     "Can't find unit {name}. Provide correct unit name. {e}",
                 )),
@@ -109,7 +109,6 @@ impl Unit {
 
         let extensions = extensions.to_vec();
         let dimensions = Unit::get_dims_from_cli(&provided_required_dims, storage, context);
-        //dbg!(dimensions.clone());
 
         Unit {
             name,
@@ -151,11 +150,17 @@ impl Unit {
         }
 
         // check if all provided dims have required infra tags
-        if let Some(affinity_tags) = self.dimensions.first().unwrap().get_dim_data()["meta"].get("affinity_tags") {
-            let allowed_tags = affinity_tags.as_array().unwrap().iter()
-                .map(|attribute: &Value| attribute.as_str().unwrap()).collect::<Vec<&str>>();
+        if let Some(affinity_tags) =
+            self.dimensions.first().unwrap().get_dim_data()["meta"].get("affinity_tags")
+        {
+            let allowed_tags = affinity_tags
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|attribute: &Value| attribute.as_str().unwrap())
+                .collect::<Vec<&str>>();
             if let Some(unit_tags) = &self.manifest.affinity_tags {
-                if value_intersection(affinity_tags.clone(), json!(unit_tags)).is_none(){
+                if value_intersection(affinity_tags.clone(), json!(unit_tags)).is_none() {
                     warn!(target: "", "Unit {:?} doesn't have required affinity tags. Allowed tags: {allowed_tags:?}. Execution terminated...", self.name);
                     std::process::exit(0);
                 }
@@ -176,8 +181,11 @@ impl Unit {
         self
     }
 
-
-    fn get_dims_from_cli(dim_names: &[String], storage: &Storage, context: Option<String>) -> Vec<Dim> {
+    fn get_dims_from_cli(
+        dim_names: &[String],
+        storage: &Storage,
+        context: Option<String>,
+    ) -> Vec<Dim> {
         dim_names
             .iter()
             .map(|dim| DimBuilder::new_from_cli(dim, &GLOBAL_CFG.org, storage, context.clone()))
@@ -200,9 +208,6 @@ impl Unit {
         dims.join("/")
     }
 
-    /// # Panics
-    ///
-    /// Will panic if there is a problem with files i/o
     pub fn remove_temp_folder(&self) {
         let path = self.temp_folder.clone();
         if path.exists() {
@@ -211,24 +216,20 @@ impl Unit {
         }
     }
 
-    /// # Panics
-    ///
-    /// Will panic if there is a problem with files i/o
     pub fn copy_files(&self) {
         // define destination temp folder
         let dest_folder = self.temp_folder.clone();
         if !dest_folder.exists() {
-            std::fs::create_dir_all(&dest_folder).unwrap_or_exit(
-                format!("Can't create temp folder: {:?}", &dest_folder),
-            );
+            std::fs::create_dir_all(&dest_folder)
+                .unwrap_or_exit(format!("Can't create temp folder: {:?}", &dest_folder));
         }
-        // define possible source folder for org unit variant
-        // let org_src_folder = Path::new(&CFG.units_path).join(&CFG.org).join(&self.name);
 
         // --------- Modules --------- //
         // add modules symlink to $temp folder
         // if modules_path is absolute => current_dir will be overwritten by join method
-        let modules_folder_path = std::env::current_dir().unwrap().join(&GLOBAL_CFG.modules_path);
+        let modules_folder_path = std::env::current_dir()
+            .unwrap()
+            .join(&GLOBAL_CFG.modules_path);
         if !dest_folder.join("modules").exists() {
             std::os::unix::fs::symlink(modules_folder_path, dest_folder.join("modules"))
                 .unwrap_or_exit("Failed to create modules symlink".to_string());
@@ -238,13 +239,15 @@ impl Unit {
         // TODO: move to runner specific logic
         // copy plugin folder from config to $HOME/.terraform.d/plugins folder if exists
         // is plugins_path absolute => current_dir will be overwritten by join method
-        let plugins_folder_path = std::env::current_dir().unwrap().join(&GLOBAL_CFG.plugins_path);
+        let plugins_folder_path = std::env::current_dir()
+            .unwrap()
+            .join(&GLOBAL_CFG.plugins_path);
         if plugins_folder_path.exists() {
             let home_dir = std::env::var("HOME").unwrap();
             copy_folder(
                 plugins_folder_path,
                 &Path::new(&home_dir).join(".terraform.d/plugins"),
-                false
+                false,
             );
         } else {
             warn!(target: "", "Plugin folder {plugins_folder_path:?} does not exist. Check cubtera config. Passed...");
@@ -266,7 +269,7 @@ impl Unit {
 
         copy_folder(self.unit_folder.clone(), &dest_folder, true);
 
-        // --------- Generate ALL Opt Dim tf files with NULL json values --------- //
+        // Generate ALL Opt Dim json files with NULL values for each unit's optional dimension
         self.opt_dims.iter().for_each(|dim| {
             dim.iter().for_each(|opt_dim| {
                 opt_dim
@@ -275,27 +278,17 @@ impl Unit {
                         "Failed to save json dim vars for dim: {:?}",
                         &dest_folder
                     ));
-                // opt_dim
-                //     .save_tf_dim_vars(dest_folder.clone())
-                //     .unwrap_or_exit(format!(
-                //         "Failed to save tf dim vars for dim: {:?}",
-                //         &dest_folder
-                //     ));
             });
         });
 
-        // --------- Generate ALL unit Dim Variables tf files with json values --------- //
+        // Generate Dim Variables json files with json values for each unit's dimension
         self.dimensions.iter().for_each(|dim| {
             dim.save_json_dim_vars(dest_folder.clone())
                 .unwrap_or_exit(format!(
                     "Failed to save json dim vars for dim {}",
                     &dim.dim_name
                 ));
-            // dim.save_tf_dim_vars(dest_folder.clone())
-            //     .unwrap_or_exit(format!(
-            //         "Failed to save tf dim vars for dim {}",
-            //         &dim.dim_name
-            //     ));
+
             dim.save_dim_includes(dest_folder.clone())
                 .unwrap_or_exit(format!(
                     "Failed to save dim includes for dim {}",
@@ -309,26 +302,6 @@ impl Unit {
                 ));
         });
 
-        // TODO: extension logic for all runners
-
-        // --------- Generate Extension tf files --------- //
-        // generate and copy ext_vars.tf file, if -e parameters was set for unit in format "ext_type:ext_name"
-        // if !&self.extensions.is_empty() {
-        //     let mut ext_tf_vars = String::new();
-        //     for extension in &self.extensions {
-        //         let mut ext = extension.split_terminator(':');
-        //         ext_tf_vars.push_str(&format!(
-        //             "variable \"ext_{}_name\" {{\n",
-        //             ext.next().unwrap()
-        //         ));
-        //         ext_tf_vars.push_str(&format!("    default     = \"{}\"\n", ext.next().unwrap()));
-        //         ext_tf_vars.push_str("    description = \"Generated by Cubtera\"\n");
-        //         ext_tf_vars.push_str("}\n\n");
-        //     }
-        //     std::fs::write(dest_folder.join("ext_vars.tf"), ext_tf_vars)
-        //         .unwrap_or_exit("Failed to write ext_vars.tf file".to_string());
-        // }
-
         if !&self.extensions.is_empty() {
             let mut ext_tf_vars = String::new();
             ext_tf_vars.push_str("{\n");
@@ -336,7 +309,8 @@ impl Unit {
                 let mut ext = extension.split_terminator(':');
                 ext_tf_vars.push_str(&format!(
                     "  \"ext_{}_name\": \"{}\",\n",
-                    ext.next().unwrap(), ext.next().unwrap()
+                    ext.next().unwrap(),
+                    ext.next().unwrap()
                 ));
             }
             // remove last comma
@@ -348,7 +322,6 @@ impl Unit {
                 .unwrap_or_exit("Failed to write cubtera_ext.json file".to_string());
         }
 
-
         // --------- Files form Unit Manifest --------- //
         // copy all files defined in unit_manifest required and optional sections
         if let Some(spec) = &self.manifest.spec {
@@ -356,7 +329,8 @@ impl Unit {
                 if let Some(required) = spec_files.required.clone() {
                     copy_files_from_manifest(required, &dest_folder, |src| {
                         exit_with_error(format!(
-                            "Required file {} from unit manifest doesn't exist.", src.red()
+                            "Required file {} from unit manifest doesn't exist.",
+                            src.red()
                         ))
                     });
                 };
@@ -369,22 +343,6 @@ impl Unit {
                 };
             }
         }
-        // if let Some(spec_files) = &self.manifest.spec.files {
-        //     if let Some(required) = spec_files.required.clone() {
-        //         copy_files_from_manifest(required, &self.unit_folder, |src| {
-        //             exit_with_error(format!(
-        //                 "Required file {src} from unit_manifest doesn't exist."
-        //             ))
-        //         });
-        //     };
-        //     if let Some(optional) = spec_files.optional.clone() {
-        //         copy_files_from_manifest(
-        //             optional,
-        //             &self.unit_folder,
-        //             |src| warn!(target:"", "Optional file {src} defined in unit_manifest doesn't exist. Passed..."),
-        //         );
-        //     };
-        // }
     }
 
     pub fn get_name(self) -> String {
@@ -398,13 +356,15 @@ fn copy_files_from_manifest(
     f: impl Fn(String),
 ) {
     for (src, dst) in files {
-        if PathBuf::new().join(&src).exists() {
+        let src_path = string_to_path(&src);
+        if PathBuf::new().join(&src_path).exists() {
             let dest = unit_folder.join(dst);
             if !dest.exists() {
                 std::fs::create_dir_all(dest.parent().unwrap())
                     .unwrap_or_exit(format!("Failed to create {dest:?} file"));
             }
-            std::fs::copy(&src, dest).unwrap_or_exit(format!("Failed to copy {} file", &src.red()));
+            std::fs::copy(&src_path, dest)
+                .unwrap_or_exit(format!("Failed to copy {} file", &src.red()));
         } else {
             f(src);
         }

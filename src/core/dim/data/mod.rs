@@ -1,6 +1,7 @@
-mod mongodb;
 mod jsonfile;
+mod mongodb;
 
+use crate::globals::GLOBAL_CFG;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,34 +31,53 @@ pub trait DataSource: CloneBox + 'static {
         Ok(())
     }
 
-    fn upsert_data_by_name(&self, name: &str, data: Value) -> Result<(), Box<dyn std::error::Error>> {
-        log::debug!("this data source doesn't support upsert_data_by_name: {}: {}", name, serde_json::json!(data));
+    fn upsert_data_by_name(
+        &self,
+        name: &str,
+        data: Value,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        log::debug!(
+            "this data source doesn't support upsert_data_by_name: {}: {}",
+            name,
+            serde_json::json!(data)
+        );
         Ok(())
     }
 
     fn delete_data_by_name(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        log::debug!("this data source doesn't support delete_data_by_name: {}", name);
+        log::debug!(
+            "this data source doesn't support delete_data_by_name: {}",
+            name
+        );
         Ok(())
     }
 
     fn delete_all_by_context(&self, context: &str) -> Result<(), Box<dyn std::error::Error>> {
-        log::debug!("this data source doesn't support delete_all_by_context: {}", context);
+        log::debug!(
+            "this data source doesn't support delete_all_by_context: {}",
+            context
+        );
         Ok(())
     }
 
     fn set_context(&mut self, context: Option<String>);
     fn get_context(&self) -> Option<String>;
 
+    // TODO: Remove after usage check
     // Legacy defaults
-    fn get_data_dim_defaults(&self) -> Result<Value, Box<dyn std::error::Error>>;
-    fn upsert_data_dim_defaults(&self, name: &str, data: Value) -> Result<(), Box<dyn std::error::Error>>;
-    fn delete_data_dim_defaults(&self, name: &str) -> Result<(), Box<dyn std::error::Error>>;
+    // fn get_data_dim_defaults(&self) -> Result<Value, Box<dyn std::error::Error>>;
+    // fn upsert_data_dim_defaults(&self, name: &str, data: Value) -> Result<(), Box<dyn std::error::Error>>;
+    // fn delete_data_dim_defaults(&self, name: &str) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 pub fn data_src_init(org: &str, dim_type: &str, storage: Storage) -> Box<dyn DataSource> {
     match storage {
         Storage::DB => Box::new(mongodb::MongoDBDataSource::new(org, dim_type)),
-        Storage::FS => Box::new(jsonfile::JsonDataSource::new(org, dim_type)),
+        Storage::FS => Box::new(jsonfile::JsonDataSource::new(
+            org,
+            dim_type,
+            &GLOBAL_CFG.inventory_path,
+        )),
         //_ => unreachable!("Unknown storage type")
     }
 }

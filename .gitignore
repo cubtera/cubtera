@@ -21,7 +21,7 @@ _legacy/
 .fleet
 
 # Examples
-example
+example/.cubtera
 example/.tmp
 .cubtera
 .env

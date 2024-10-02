@@ -1,0 +1,52 @@
+[ default ] # all parameters are optional, default values are shown
+workspace_path = "example" # default => "~/.cubtera"
+temp_folder_path = "example/.cubtera/tmp" # default => "~/.cubtera/tmp"
+
+units_folder = "units" # default => "units"
+modules_folder = "modules" # default => "modules"
+inventory_folder = "inventory" # default => "inventory"
+
+units_path = "example/units" # $workspace_path/$units_folder | override units_folder
+modules_path = "example/modules" # $workspace_path/$modules_folder | override modules_folder
+inventory_path = "example/inventory" # $workspace_path/$inventory_folder | override inventory_folder
+
+dim_relations = "dome:env:dc" # default => "dome:env:dc" | Relations of base dimension's types (colon separated)
+orgs = "cubtera:teracub" # default => "cubtera" | List of orgs (tenants) in inventory to work with (colon separated)
+
+# Usefull for development and CI/CD
+always_copy_files = true # default => "false" | Copy files to the runner's temp folder
+clean_cache = false # default => "false" | Clean runner's temp folder after successful run
+
+# LEGACY PARAMS (will be removed or changed in the future)
+tf_state_s3bucket = "cubtera-default-tfstate" # default => "cubtera-default-tfstate" | CHABGE TO YOUR BUCKET!
+tf_state_s3region  = "us-east-1" # default => "us-east-1" | CHANGE TO YOUR REGION!
+tf_state_key_prefix = "" # default => None
+
+[ cubtera ] # optional, custom configuration for the org, overrides default parameters with the same name
+# usefull for multiple orgs management in the same workspace
+
+# LEGACY PARAMS (will be removed or changed in the future)
+tf_state_s3region  = "us-east-2" # default => "us-east-1" | CHANGE TO YOUR REGION!
+tf_state_s3bucket  = "cubtera-example-tfstate" # default => "cubtera-default-tfstate" | CHABGE TO YOUR BUCKET!
+tf_state_key_prefix = "cubtera/" # default => None | CHANGE TO YOUR PREFIX IF NEEDED!
+
+[cubtera.state.s3] # optional, global org configuration for the state backend of S3 type
+bucket = "{{ org }}-example-state"
+key    = "{{ dim_tree }}/{{ unit_name }}.tfstate"
+region = "us-east-1"
+
+[cubtera.state.local] # optional, global org configuration for the state backend of local type
+path = "~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate"
+
+[cubtera.runner.tf] # optional, custom configuration for the runner of Terraform type
+state_backend = "s3" # or "local", default is S3 for tf runner
+
+inlet_command = "echo Inlet command" # default => None, will run command before runner starts, in temp folder context
+outlet_command = "echo Outlet command" # default => None, will run command after runner finishes successfully, in temp folder context
+
+# version = "1.7.0" # default => latest, will be ignored if runner_command is set, will be latest if bot are not set
+# runner_command = "terraform" # default => None, will run command with the runner
+# extra_params = "-json" # default => None, will add extra params to the runner_command
+
+[cubtera.runner.bash]
+runner_command = "./runner.sh"

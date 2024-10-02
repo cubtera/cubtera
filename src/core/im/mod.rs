@@ -1,7 +1,7 @@
-use crate::core::dim::*;
 use crate::core::dim::data::*;
-use crate::utils::helper::*;
+use crate::core::dim::*;
 use crate::prelude::GLOBAL_CFG;
+use crate::utils::helper::*;
 
 use serde_json::json;
 use serde_json::Value;
@@ -12,7 +12,7 @@ pub fn get_dim_by_name(
     dim_name: &str,
     org: &str,
     storage: &Storage,
-    context: Option<String>
+    context: Option<String>,
 ) -> Value {
     let dim = DimBuilder::new(dim_type, org, storage)
         .with_name(dim_name)
@@ -28,13 +28,8 @@ pub fn get_dim_by_name(
     })
 }
 
-pub fn get_dim_names_by_type(
-    dim_type: &str,
-    org: &str,
-    storage: &Storage
-) -> Value {
-    let dims = DimBuilder::new(dim_type, org, storage)
-        .get_all_dim_names();
+pub fn get_dim_names_by_type(dim_type: &str, org: &str, storage: &Storage) -> Value {
+    let dims = DimBuilder::new(dim_type, org, storage).get_all_dim_names();
 
     json!({
         "status": "ok",
@@ -45,10 +40,10 @@ pub fn get_dim_names_by_type(
 }
 
 pub fn get_dims_data_by_type(dim_type: &str, org: &str, storage: &Storage) -> Value {
-    let names = DimBuilder::new(dim_type, org, storage)
-        .get_all_dim_names();
+    let names = DimBuilder::new(dim_type, org, storage).get_all_dim_names();
 
-    let data = names.iter()
+    let data = names
+        .iter()
         .map(|name| {
             let dim = DimBuilder::new(dim_type, org, storage)
                 .with_name(name)
@@ -80,12 +75,7 @@ pub fn get_dim_defaults_by_type(dim_type: &str, org: &str, storage: &Storage) ->
     })
 }
 
-pub fn get_dim_kids (
-    dim_type: &str,
-    dim_name: &str,
-    org: &str,
-    storage: &Storage
-) -> Value {
+pub fn get_dim_kids(dim_type: &str, dim_name: &str, org: &str, storage: &Storage) -> Value {
     let kids = DimBuilder::new(dim_type, org, storage)
         .with_name(dim_name)
         .get_all_kids_by_name();
@@ -129,20 +119,20 @@ pub fn get_dim_parent(dim_type: &str, dim_name: &str, org: &str, storage: &Stora
 pub fn get_all_orgs(storage: &Storage) -> Value {
     let orgs = match storage {
         Storage::DB => {
-            let db = GLOBAL_CFG.db_client.clone().unwrap_or_exit(
-                "Can't start DB client".into()
-            );
-            db.list_database_names(None, None).unwrap_or_exit(
-                "Can't read list of orgs from DB".into()
-            )
+            let db = GLOBAL_CFG
+                .db_client
+                .clone()
+                .unwrap_or_exit("Can't start DB client".into());
+            db.list_database_names(None, None)
+                .unwrap_or_exit("Can't read list of orgs from DB".into())
         }
         Storage::FS => GLOBAL_CFG.orgs.clone(),
     }
-        .iter()
-        .map(String::as_ref)
-        .filter(|dim| !["admin", "local", "config", "test"].contains(dim))
-        .map(|dim| dim.to_string())
-        .collect::<Vec<String>>();
+    .iter()
+    .map(String::as_ref)
+    .filter(|dim| !["admin", "local", "config", "test"].contains(dim))
+    .map(|dim| dim.to_string())
+    .collect::<Vec<String>>();
 
     json!({
         "status": "ok",
@@ -152,7 +142,8 @@ pub fn get_all_orgs(storage: &Storage) -> Value {
 }
 
 pub fn get_dlog_by_keys(org: &str, keys: Vec<String>, limit: Option<i64>) -> Value {
-    let keys: HashMap<String, String> = keys.iter()
+    let keys: HashMap<String, String> = keys
+        .iter()
         .map(|dim: &String| {
             let parts: Vec<&str> = dim.split(':').collect();
             (parts[0].to_string(), parts[1].to_string())
@@ -164,7 +155,8 @@ pub fn get_dlog_by_keys(org: &str, keys: Vec<String>, limit: Option<i64>) -> Val
 }
 
 pub fn get_dlog(org: &str, filter: Value, limit: Option<i64>) -> Value {
-    let client: Option<mongodb::sync::Client> = GLOBAL_CFG.dlog_db.as_ref().map(|db| db_connect(db));
+    let client: Option<mongodb::sync::Client> =
+        GLOBAL_CFG.dlog_db.as_ref().map(|db| db_connect(db));
 
     if client.is_none() {
         return json!({
@@ -173,7 +165,7 @@ pub fn get_dlog(org: &str, filter: Value, limit: Option<i64>) -> Value {
             "message": format!("Can't connect to dlog DB {}", &GLOBAL_CFG.dlog_db.clone().unwrap_or("".to_string())),
             "notes": "Check CUBTERA_DLOG_DB env variable",
             "data": Value::Null,
-        })
+        });
     }
 
     let db = client.unwrap().database(org);
@@ -185,10 +177,11 @@ pub fn get_dlog(org: &str, filter: Value, limit: Option<i64>) -> Value {
         .build();
     let filter = to_dot_notation(&filter, "".to_string());
     let filter = json!(filter);
-    let filter= mongodb::bson::to_document(&filter).unwrap_or_default();
+    let filter = mongodb::bson::to_document(&filter).unwrap_or_default();
 
     let res = col.find(filter.clone(), options).unwrap();
-    let res:Vec<Value>  = res.collect::<mongodb::error::Result<Vec<mongodb::bson::Bson>>>()
+    let res: Vec<Value> = res
+        .collect::<mongodb::error::Result<Vec<mongodb::bson::Bson>>>()
         .unwrap_or_default()
         .iter()
         .map(|bson| mongodb::bson::from_bson::<Value>(bson.clone()).unwrap_or_default())
@@ -208,7 +201,11 @@ fn to_dot_notation(value: &Value, prefix: String) -> HashMap<String, Value> {
 
     if let Value::Object(map) = value {
         for (key, value) in map {
-            let new_key = if prefix.is_empty() { key.clone() } else { format!("{}.{}", prefix, key) };
+            let new_key = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{}.{}", prefix, key)
+            };
             match value {
                 Value::Object(_) => {
                     result.extend(to_dot_notation(value, new_key));
@@ -232,11 +229,11 @@ pub fn get_all_dim_types(org: &str, storage: &Storage) -> Value {
         }
         Storage::FS => GLOBAL_CFG.orgs.clone(),
     }
-        .iter()
-        .map(String::as_ref)
-        .filter(|dim| !["defaults", "log", "dlog"].contains(dim))
-        .map(|dim| dim.to_string())
-        .collect::<Vec<String>>();
+    .iter()
+    .map(String::as_ref)
+    .filter(|dim| !["defaults", "log", "dlog"].contains(dim))
+    .map(|dim| dim.to_string())
+    .collect::<Vec<String>>();
 
     json!({
         "status": "ok",
