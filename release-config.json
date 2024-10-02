@@ -1,0 +1,53 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {}
+  },
+  "release-type": "rust",
+  "changelog-sections": [
+    {
+      "title": "Features",
+      "type": "feat"
+    },
+    {
+      "title": "Bug Fixes",
+      "type": "fix"
+    },
+    {
+      "title": "Documentation",
+      "type": "docs"
+    },
+    {
+      "title": "Code Style",
+      "type": "style"
+    },
+    {
+      "title": "Refactors",
+      "type": "refactor"
+    },
+    {
+      "title": "Tests",
+      "type": "test"
+    },
+    {
+      "title": "Build System",
+      "type": "build"
+    },
+    {
+      "title": "Continuous Integration",
+      "type": "ci"
+    },
+    {
+      "title": "Security",
+      "type": "security"
+    },
+    {
+      "title": "Dependencies",
+      "type": "deps"
+    },
+    {
+      "title": "Breaking Changes",
+      "type": "breaking"
+    }
+  ]
+}

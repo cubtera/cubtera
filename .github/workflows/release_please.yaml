@@ -26,6 +26,8 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           release-type: rust
+          config-file: release-config.json
+
 
   build:
     name: Build and release for ${{ matrix.name }}
