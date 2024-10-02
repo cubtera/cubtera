@@ -4,6 +4,7 @@
     ".": {}
   },
   "release-type": "rust",
+  "changelog-type": "github",
   "changelog-sections": [
     {
       "title": "Features",
