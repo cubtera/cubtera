@@ -25,9 +25,7 @@ jobs:
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          config-file: .github/workflows/release-config.json
-          manifest-file: .github/workflows/release-manifest.json
-
+          release-type: rust
 
   build:
     name: Build and release for ${{ matrix.name }}
