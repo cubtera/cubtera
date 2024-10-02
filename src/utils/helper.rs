@@ -269,12 +269,11 @@ pub fn group_tuples(tuples: Vec<(String, String)>) -> HashMap<String, Vec<String
 /// assert_eq!(result, Some(json_obj));
 /// ```
 pub fn validate_json_by_schema(json: &Value, schema: &Value) -> Option<Value> {
-    let compiled_schema = jsonschema::JSONSchema::compile(schema).unwrap();
-    dbg!(&compiled_schema);
-    let result = compiled_schema.validate(json);
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let result = validator.validate(json);
+
     match result {
         Ok(_) => {
-            dbg!(&json);
             Some(json.clone())
         }
         Err(errors) => {
@@ -309,14 +308,15 @@ pub fn read_and_validate_json(json_path: PathBuf, schema_path: PathBuf) -> Optio
         .unwrap_or_exit(format!("Can't read schema: {:?}.", &schema_path));
     let json_schema = serde_json::from_str(&json_schema)
         .unwrap_or_exit(format!("Can't parse schema: {:?}.", schema_path));
-    let compiled_schema = jsonschema::JSONSchema::compile(&json_schema).unwrap();
+
+    let validator = jsonschema::validator_for(&json_schema).unwrap();
 
     let json_data = std::fs::read_to_string(&json_path)
         .unwrap_or_exit(format!("Can't read json: {:?}", &json_path));
     let json = serde_json::from_str::<Value>(&json_data)
         .unwrap_or_exit(format!("Can't parse json: {:?}", json_path));
 
-    let result = compiled_schema.validate(&json);
+    let result = validator.validate(&json);
 
     match result {
         Ok(_) => Some(json.clone()),
