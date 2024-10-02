@@ -16,6 +16,29 @@ or download binary from [releases](https://ginhub.com/cubtera/cubtera/releases) 
 
 Configure cli with [config file](.github/docs/config.md) or with [environment variables](.github/docs/config.md#environment-variables).
 
+## Core Concepts
+
+### Dimensions
+
+Cubtera uses the concept of "dimensions" to organize and manage infrastructure. Dimensions can represent any logical grouping or layer of your infrastructure. Examples include:
+
+- Cloud accounts (e.g., management, production, staging)
+- Environments (e.g., dev, test, staging, production)
+- Data centers (e.g., different regions or types of data centers related to one env)
+- Applications (e.g., different applications or services with the same flows)
+- And more (user-definable: databases, storages, domains, etc.)
+
+Dimensions could be hierarchical and can have parent-child relationships, as well as flat dimensions with no relationships.
+
+### Participants
+
+Each dimension type can have multiple "participants," which are specific instances or configurations within that dimension. Participants are defined in JSON files and stored in the inventory.
+
+### Units
+
+Units are the smallest operational entities in Cubtera, representing specific scripts or actions that can be performed on your infrastructure by different tools like Terraform, Opentofu, Bash Scripts, Helm,  etc. 
+Units are stored in the inventory and can be run with different dimensions values and using cubtera variables defined in the inventory and named following simple convention.
+
 ### Features
 - [Units management](.github/docs/unit.md): the same IaC code module (tf, otf, bash, etc.) runs with different dimensions values
 - [Inventory management](.github/docs/im.md): manage your inventory content with CLI commands
