@@ -25,8 +25,7 @@ jobs:
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          release-type: rust
-          config-file: release-config.json
+          config-file: ./release-config.json
 
 
   build:
