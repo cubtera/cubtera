@@ -5,6 +5,8 @@
   },
   "release-type": "rust",
   "changelog-type": "github",
+  "commit-search-depth": 10,
+  "release-search-depth": 5,
   "changelog-sections": [
     {
       "title": "Features",
