@@ -175,7 +175,7 @@ impl RunnerBuilder {
     pub fn build(&self) -> Box<dyn Runner> {
         let mut params = HashMap::new();
         let mut state_type = "";
-        let mut state_backend = Value::Null;
+        // let mut state_backend = Value::Null;
 
         if let Some(runner) = &GLOBAL_CFG.runner {
             // let config_runner = runner.get(&self.unit.manifest.unit_type);
@@ -187,9 +187,6 @@ impl RunnerBuilder {
                 if let Some(state) = config_runner_params.get("state_backend") {
                     state_type = state;
                 }
-                // config_runner_params
-                //     .get("state_backend")
-                //     .map(|s| state_type = s);
             }
         }
 
@@ -201,9 +198,6 @@ impl RunnerBuilder {
             if let Some(state) = manifest_runner_params.get("state_backend") {
                 state_type = state;
             }
-            // manifest_runner_params
-            //     .get("state_backend")
-            //     .map(|s| state_type = s);
         }
 
         if state_type.is_empty() {
@@ -211,36 +205,60 @@ impl RunnerBuilder {
             state_type = "local";
         }
 
-        // check if state type is defined in global config
-        if let Some(s) = GLOBAL_CFG.clone().state
-            .and_then(|s| s.get(state_type).cloned()){
-            state_backend = json!(s);
-        }
-        
-        // GLOBAL_CFG
-        //     .clone()
-        //     .state
-        //     .and_then(|s| s.get(state_type).cloned())
-        //     .map(|s| state_backend = json!(s));
 
-        // check if state type is defined in unit manifest
-        if let Some(state) = &self.unit.manifest.state {
-            state_backend = json!(state.clone());
-        }
-        // self.unit.manifest.state.clone()
-        //     .map(|s| state_backend = json!(s));
-
-        state_backend = match state_backend.is_null() {
-            true => {
-                debug!(target: "runner", "State backend config is not defined in global config or unit manifest. Using default.");
-                json!({
+        let state_backend = GLOBAL_CFG
+            .clone()
+            .state
+            .and_then(|s| s.get(state_type).cloned())
+            .or(self.unit.manifest.state.clone())
+            .map_or_else(
+                || json!({
                     "local": {
-                        "path": "~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate",
+                        "path": string_to_path("~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate"),
                     }
-                })
-            }
-            false => json!({state_type: state_backend }),
-        };
+                }),
+                |state| {
+                    if state_type == "local" {
+                        json!({
+                            "local": {
+                                "path": string_to_path(state.get("path")
+                                    .unwrap_or_exit("Local backend path is not defined right in global config or unit manifest".into())),
+                            }
+                        })
+                    } else { json!({ state_type: state}) }
+            });
+
+            // .map(|state| json!({ state_type: state }))
+            // .unwrap_or(json!({
+            //     "local": {
+            //         "path": string_to_path("~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate"),
+            //     }
+            // }));
+
+        // // check if state type is defined in global config
+        // if let Some(s) = GLOBAL_CFG.clone().state
+        //     .and_then(|s| s.get(state_type).cloned()){
+        //     state_backend = json!(s);
+        // }
+        //
+        // // check if state type is defined in unit manifest
+        // if let Some(state) = &self.unit.manifest.state {
+        //     state_backend = json!(state.clone());
+        // }
+        // // self.unit.manifest.state.clone()
+        // //     .map(|s| state_backend = json!(s));
+
+        // let state_backend = match backend {
+        //     None => {
+        //         debug!(target: "runner", "State backend config is not defined in global config or unit manifest. Using default.");
+        //         json!({
+        //             "local": {
+        //                 "path": string_to_path("~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate"),
+        //             }
+        //         })
+        //     }
+        //     Some(backend) => json!({ state_type: backend }),
+        // };
 
         // TODO: Move this to a separate function
         // apply handlebars template to state_backend definition
