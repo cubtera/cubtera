@@ -193,12 +193,6 @@ impl Runner for TfRunner {
             self.load.command.join(" ").blue(),
         );
 
-        let filtered_env_vars: HashMap<String, String> = std::env::vars()
-            .filter(
-                |(k, _)| k.starts_with("TF_VAR_"), //|| k == "CUBTERA_TF_STATE_BUCKET_NAME"
-            )
-            .collect();
-
         // start terraform with all required arguments
         let mut tf_command = Command::new(&tf_path);
 
@@ -206,12 +200,6 @@ impl Runner for TfRunner {
         // check if another instance is running with init and wait for it to finish
         if matches!(&self.load.command.as_slice(), [cmd, ..] if cmd == "init") {
             let delay = rand::thread_rng().gen_range(800..1200);
-
-            // while socket.is_none() {
-            //     socket = TcpListener::bind(("0.0.0.0", LOCK_PORT)).ok();
-            //     info!(target: "tf runner", "Waiting for unlock while init in parallel");
-            //     std::thread::sleep(std::time::Duration::from_millis(delay));
-            // }
 
             loop {
                 match TcpListener::bind(("0.0.0.0", self.load.params.get_lock_port())) {
@@ -233,16 +221,7 @@ impl Runner for TfRunner {
             .current_dir(self.load.unit.temp_folder.to_str().unwrap())
             .args(&self.load.command)
             .args(tf_args)
-            .envs(filtered_env_vars)
-            .env("TF_VAR_org_name", &GLOBAL_CFG.org)
-            .env("TF_VAR_unit_name", &self.load.unit.name)
-            // TODO: remove after units lib is fixed (LEGACY)
-            .env("TF_VAR_tf_state_s3bucket", &GLOBAL_CFG.tf_state_s3bucket)
-            .env("TF_VAR_tf_state_s3region", &GLOBAL_CFG.tf_state_s3region)
-            .env(
-                "TF_VAR_tf_state_key_prefix",
-                GLOBAL_CFG.tf_state_key_prefix.clone().unwrap_or_default(),
-            )
+            .envs(self.get_env_tf_vars())
             //.env("TF_DATA_DIR", &self.config.temp_folder_path)
             //.env("TF_PLUGIN_CACHE_DIR", "~/.terraform.d/plugin-cache")
             //.env("TF_DATA_DIR", &self.config.temp_folder_path)
@@ -314,6 +293,31 @@ impl Runner for TfRunner {
 }
 
 impl TfRunner {
+    fn get_env_tf_vars(&self) -> HashMap<String, String> {
+        // get all env vars started with TF_VAR_
+        let mut env_vars: HashMap<String, String> = std::env::vars()
+            .filter(
+                |(k, _)| k.starts_with("TF_VAR_"),
+            )
+            .collect();
+
+        env_vars.insert("TF_VAR_org_name".into(), GLOBAL_CFG.org.clone());
+        env_vars.insert("TF_VAR_unit_name".into(), self.load.unit.name.clone());
+        env_vars.insert("TF_VAR_dim_tree".into(), self.load.unit.get_unit_state_path());
+
+        // add S3 state backend vars (LEGACY)
+        if let Some(state) = self.load.state_backend.get("s3") {
+            env_vars.insert("TF_VAR_tf_state_s3bucket".into(), state.get("bucket")
+                .unwrap().to_string());
+            env_vars.insert("TF_VAR_tf_state_s3region".into(), state.get("region")
+                .unwrap().to_string());
+            env_vars.insert("TF_VAR_tf_state_s3key".into(), state.get("key")
+                .unwrap().to_string());
+        }
+
+        env_vars
+    }
+
     fn create_state_backend(&self) -> Result<(), Box<dyn std::error::Error>> {
         // create tf backend config hcl file
         let tf_hcl = json!({
