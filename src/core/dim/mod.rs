@@ -366,6 +366,7 @@ impl DimBuilder {
     }
 
     pub fn save_all_data_by_type(&self) {
+        use yansi::Paint;
         let data = self.get_all_dim_data();
         let count = data.clone().len();
 
@@ -374,8 +375,8 @@ impl DimBuilder {
         builder
             .datasource
             .upsert_all_data(data)
-            .unwrap_or_exit(format!("Error saving dim {} data to DB:", &self.dim_type));
-        info!("{count} dim names of {} were saved", &self.dim_type);
+            .unwrap_or_exit(format!("Error saving dim {} data to DB:", &self.dim_type.red()));
+        info!(target: "im", "Saved {} dimensions of {} type", count.blue(), &self.dim_type.blue());
     }
 
     pub fn delete_data(&self) {

@@ -54,7 +54,7 @@ impl Unit {
                     (manifest, None)
                 }
                 Err(e) => exit_with_error(format!(
-                    "Can't find unit {name}. Provide correct unit name. {e}",
+                    "Can't proceed with unit {}. {e}, ", name.red(),
                 )),
             },
         };
