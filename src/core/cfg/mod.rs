@@ -25,10 +25,6 @@ pub struct CubteraConfig {
     pub org: String,
     #[serde(default = "default_temp_folder_path")]
     pub temp_folder_path: String,
-    #[serde(default = "default_tf_state_s3bucket")]
-    pub tf_state_s3bucket: String,
-    #[serde(default = "default_tf_state_s3region")]
-    pub tf_state_s3region: String,
     #[serde(
         deserialize_with = "deserialize_colon_list",
         serialize_with = "serialize_colon_list",
@@ -41,8 +37,6 @@ pub struct CubteraConfig {
         default = "default_dim_relations"
     )]
     pub dim_relations: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tf_state_key_prefix: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub db: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,13 +104,6 @@ fn default_org() -> String {
     "cubtera".into()
 }
 
-fn default_tf_state_s3bucket() -> String {
-    "cubtera_state_bucket".to_string()
-}
-fn default_tf_state_s3region() -> String {
-    "us-east-1".to_string()
-}
-
 impl Default for CubteraConfig {
     fn default() -> Self {
         Self {
@@ -126,11 +113,6 @@ impl Default for CubteraConfig {
             modules_path: default_modules_path(),
             plugins_path: default_plugins_path(),
             temp_folder_path: default_temp_folder_path(),
-
-            tf_state_s3bucket: default_tf_state_s3bucket(),
-            tf_state_s3region: default_tf_state_s3region(),
-            tf_state_key_prefix: None,
-
             org: default_org(),
             orgs: default_orgs(),
             dim_relations: default_dim_relations(),
