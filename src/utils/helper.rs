@@ -269,7 +269,7 @@ pub fn group_tuples(tuples: Vec<(String, String)>) -> HashMap<String, Vec<String
 /// assert_eq!(result, Some(json_obj));
 /// ```
 pub fn validate_json_by_schema(json: &Value, schema: &Value) -> Option<Value> {
-    let validator = jsonschema::validator_for(&schema).unwrap();
+    let validator = jsonschema::validator_for(schema).unwrap();
     let result = validator.validate(json);
 
     match result {
