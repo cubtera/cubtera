@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.6](https://github.com/cubtera/cubtera/compare/v1.0.5...v1.0.6) (2024-10-10)
+
+
+### Bug Fixes
+
+* add more internal tf vars available ([3d3713f](https://github.com/cubtera/cubtera/commit/3d3713f39ad889e1278902baba257009de69f4e8))
+* add some modules related readme files ([3dedb7c](https://github.com/cubtera/cubtera/commit/3dedb7cb613d48baf43da8ef5096cee425a2da8e))
+* add tf runner multi-backend logic ([2581324](https://github.com/cubtera/cubtera/commit/2581324eedb516d6f48c23530f61ee2546734087))
+* **cfg:** remove deprecated params ([ad1b06a](https://github.com/cubtera/cubtera/commit/ad1b06a5698511374df86d8ff59eeab2e497876b))
+* change errors description ([cd49b87](https://github.com/cubtera/cubtera/commit/cd49b87da4eb7cf64c2c26307344efa2ad4e9344))
+* **lint:** remove redundant reference ([b6e91f8](https://github.com/cubtera/cubtera/commit/b6e91f8b343bb3ca3256e444bfccaecc55bf5b9f))
+
 ## [1.0.5](https://github.com/cubtera/cubtera/compare/v1.0.4...v1.0.5) (2024-10-02)
 
 
