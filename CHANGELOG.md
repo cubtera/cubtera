@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.7](https://github.com/cubtera/cubtera/compare/v1.0.6...v1.0.7) (2024-10-14)
+
+
+### Bug Fixes
+
+* **dim:** fix only null meta vars for optional dims ([e42476a](https://github.com/cubtera/cubtera/commit/e42476aff2c88160182679d753133f995b152974))
+
 ## [1.0.6](https://github.com/cubtera/cubtera/compare/v1.0.5...v1.0.6) (2024-10-10)
 
 
