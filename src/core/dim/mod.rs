@@ -6,6 +6,7 @@ use crate::prelude::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use rocket::http::ext::IntoCollection;
 
 #[derive(Debug, Clone, Default)]
 pub struct Dim {
@@ -220,6 +221,34 @@ impl DimBuilder {
             data: json!({"meta": Value::Null}),
             ..Default::default()
         }
+    }
+
+    fn get_all_default_types_with_null(dim_type: &str) -> Value{
+        let dim_path = Path::new(&GLOBAL_CFG.inventory_path)
+            .join(&GLOBAL_CFG.org)
+            .join(dim_type);
+        
+        let files: Vec<Value> = std::fs::read_dir(dim_path)
+            .unwrap_or_exit("Unable to read inventory for optional".to_string())
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|entry| entry.is_file())
+            .filter(|entry| entry.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .starts_with(".default:")
+            )
+            .map(|entry| {
+                let file_name = entry.file_stem().unwrap_or_default().to_string_lossy();
+                file_name.strip_prefix(".default:").unwrap_or_default().to_string()
+            })
+            .map(|entry| json!({
+                entry : Value::Null
+            }))
+            .collect::<Vec<Value>>();
+
+
+        json!(files)
     }
 
     pub fn with_name(mut self, dim_name: &str) -> Self {
