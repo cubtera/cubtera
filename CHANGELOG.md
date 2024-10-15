@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.8](https://github.com/cubtera/cubtera/compare/v1.0.7...v1.0.8) (2024-10-15)
+
+
+### Bug Fixes
+
+* fix previous release ([ae54ef1](https://github.com/cubtera/cubtera/commit/ae54ef105ecad2144fa5617663b0b8f33b0b1005))
+
 ## [1.0.7](https://github.com/cubtera/cubtera/compare/v1.0.6...v1.0.7) (2024-10-14)
 
 
