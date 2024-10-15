@@ -215,40 +215,35 @@ impl DimBuilder {
     }
 
     pub fn new_undefined(dim_type: &str) -> Self {
+        let mut null_data = Self::get_null_keys_for_dim(dim_type);
+        null_data["meta"] = Value::Null;
+
         Self {
             dim_type: dim_type.into(),
             dim_name: "undefined".to_string(),
-            data: json!({"meta": Value::Null}),
+            data: null_data,
             ..Default::default()
         }
     }
 
-    fn get_all_default_types_with_null(dim_type: &str) -> Value{
+    fn get_null_keys_for_dim(dim_type: &str) -> Value {
         let dim_path = Path::new(&GLOBAL_CFG.inventory_path)
             .join(&GLOBAL_CFG.org)
             .join(dim_type);
-        
-        let files: Vec<Value> = std::fs::read_dir(dim_path)
-            .unwrap_or_exit("Unable to read inventory for optional".to_string())
+
+        std::fs::read_dir(dim_path)
+            .unwrap_or_exit(format!("Unable to read optional dim {} from inventory", dim_type))
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
             .filter(|entry| entry.is_file())
-            .filter(|entry| entry.file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .starts_with(".default:")
-            )
-            .map(|entry| {
-                let file_name = entry.file_stem().unwrap_or_default().to_string_lossy();
-                file_name.strip_prefix(".default:").unwrap_or_default().to_string()
+            .filter_map(|entry| {
+                entry.file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .strip_prefix(".default:")
+                    .map(|key| (key.to_string(), Value::Null))
             })
-            .map(|entry| json!({
-                entry : Value::Null
-            }))
-            .collect::<Vec<Value>>();
-
-
-        json!(files)
+            .collect::<Value>()
     }
 
     pub fn with_name(mut self, dim_name: &str) -> Self {
