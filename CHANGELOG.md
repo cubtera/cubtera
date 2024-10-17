@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.9](https://github.com/cubtera/cubtera/compare/v1.0.8...v1.0.9) (2024-10-17)
+
+
+### Bug Fixes
+
+* s3 tf state vars broken string ([c25ef95](https://github.com/cubtera/cubtera/commit/c25ef952055b7cde67d44044f7ecb461d1778cd8))
+
 ## [1.0.8](https://github.com/cubtera/cubtera/compare/v1.0.7...v1.0.8) (2024-10-15)
 
 
