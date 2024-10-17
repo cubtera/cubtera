@@ -6,7 +6,6 @@ use crate::prelude::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use rocket::http::ext::IntoCollection;
 
 #[derive(Debug, Clone, Default)]
 pub struct Dim {

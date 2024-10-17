@@ -308,11 +308,20 @@ impl TfRunner {
         // add S3 state backend vars (LEGACY)
         if let Some(state) = self.load.state_backend.get("s3") {
             env_vars.insert("TF_VAR_tf_state_s3bucket".into(), state.get("bucket")
-                .unwrap().to_string());
+                .and_then(|b| b.as_str())
+                .unwrap_or_default()
+                .to_string()
+            );
             env_vars.insert("TF_VAR_tf_state_s3region".into(), state.get("region")
-                .unwrap().to_string());
+                .and_then(|b| b.as_str())
+                .unwrap_or_default()
+                .to_string()
+            );
             env_vars.insert("TF_VAR_tf_state_s3key".into(), state.get("key")
-                .unwrap().to_string());
+                .and_then(|b| b.as_str())
+                .unwrap_or_default()
+                .to_string()
+            );
         }
 
         env_vars
