@@ -10,9 +10,41 @@ pub enum Storage {
     DB,
 }
 
+impl Default for Storage {
+    fn default() -> Self {
+        Storage::FS
+    }
+}
+
+impl Storage {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "fs" => Storage::FS,
+            "db" => Storage::DB,
+            _ => unreachable!("Unknown storage type"),
+        }
+    }
+
+    pub fn to_str(&self) -> &str {
+        match self {
+            Storage::FS => "fs",
+            Storage::DB => "db",
+        }
+    }
+
+    // TODO: make configurable
+    pub fn get_defaults_prefix(&self) -> &str {
+        match self {
+            Storage::FS => ".defaults:",
+            Storage::DB => "_defaults:",
+        }
+    }
+}
+
 pub trait CloneBox {
     fn clone_box(&self) -> Box<dyn DataSource>;
 }
+
 impl<T: DataSource + Clone> CloneBox for T {
     fn clone_box(&self) -> Box<dyn DataSource> {
         Box::new(self.clone())
@@ -62,12 +94,6 @@ pub trait DataSource: CloneBox + 'static {
 
     fn set_context(&mut self, context: Option<String>);
     fn get_context(&self) -> Option<String>;
-
-    // TODO: Remove after usage check
-    // Legacy defaults
-    // fn get_data_dim_defaults(&self) -> Result<Value, Box<dyn std::error::Error>>;
-    // fn upsert_data_dim_defaults(&self, name: &str, data: Value) -> Result<(), Box<dyn std::error::Error>>;
-    // fn delete_data_dim_defaults(&self, name: &str) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 pub fn data_src_init(org: &str, dim_type: &str, storage: Storage) -> Box<dyn DataSource> {

@@ -117,7 +117,7 @@ impl Dlog {
             //let col = MongoCollection::new(org, "dlog", &cl);
             let data = serde_json::json!(self);
             let doc = mongodb::bson::to_bson(&data)?;
-            col.insert_one(doc, None)?;
+            col.insert_one(doc).run()?;
             return Ok(());
         }
         anyhow::bail!("Can't connect to dLog DB");

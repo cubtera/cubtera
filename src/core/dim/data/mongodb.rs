@@ -43,14 +43,11 @@ impl MongoDBDataSource {
 
 impl DataSource for MongoDBDataSource {
     fn get_data_by_name(&self, name: &str) -> Result<Value, Box<dyn std::error::Error>> {
-        let options = mongodb::options::FindOneOptions::builder()
-            .max_time(std::time::Duration::from_secs(5))
-            .build();
-
         if let Some(ctx) = &self.context {
             if !ctx.is_empty() {
                 let filter = doc! { "name": name, "context": ctx };
-                let bson = self.col.find_one(filter, options.clone())?;
+                let bson = self.col.find_one(filter)
+                    .run()?;
                 if bson.is_some() {
                     let bson = bson.unwrap();
                     let mut res = mongodb::bson::from_bson::<Value>(bson)?;
@@ -63,7 +60,7 @@ impl DataSource for MongoDBDataSource {
         }
 
         let filter = doc! { "name": name, "context": { "$exists": false }};
-        let bson = self.col.find_one(filter, options)?;
+        let bson = self.col.find_one(filter).run()?;
 
         let res = match bson {
             Some(bson) => bson,
@@ -80,10 +77,7 @@ impl DataSource for MongoDBDataSource {
             "context": { "$exists": false },
             "name": { "$not": { "$regex": "^_default", "$options": "i" }}
         };
-        let options = mongodb::options::FindOptions::builder()
-            .max_time(std::time::Duration::from_secs(5))
-            .build();
-        let bson = self.col.find(filter, options)?;
+        let bson = self.col.find(filter).run()?;
         let res = bson
             .map(|doc| doc.unwrap())
             .map(|doc| mongodb::bson::from_bson::<Value>(doc).unwrap_or_default())
@@ -105,12 +99,11 @@ impl DataSource for MongoDBDataSource {
     }
 
     fn get_all_types(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let filter = doc! {};
-        Ok(self.db.list_collection_names(filter)?)
+        Ok(self.db.list_collection_names().run()?)
     }
 
     fn upsert_all_data(&self, data: Vec<Value>) -> Result<(), Box<dyn std::error::Error>> {
-        let mut session = self.client.start_session(None)?;
+        // let mut session = self.client.start_session()?;
         let mut data = data;
         data.iter_mut().for_each(|doc| {
             if let Some(name) = doc.get("name").and_then(|name| name.as_str()) {
@@ -122,18 +115,15 @@ impl DataSource for MongoDBDataSource {
                     }
                 }
                 let replacement = mongodb::bson::to_bson(&doc).unwrap_or_default();
-                let options = mongodb::options::ReplaceOptions::builder()
-                    .upsert(true)
-                    .build();
                 rocket::tokio::task::block_in_place(|| {
-                    let res = self.col.replace_one_with_session(
+                    let res = self.col.replace_one(
                         query,
                         replacement,
-                        options,
-                        &mut session,
-                    );
+                    )
+                        .upsert(true)
+                        .run();
                     if res.is_err() {
-                        log::debug!("Upsert failed: {:?}", res.err());
+                        debug!("Upsert failed: {:?}", res.err());
                     }
                 });
             }
@@ -157,12 +147,10 @@ impl DataSource for MongoDBDataSource {
                 data["context"] = json!(ctx);
             }
         }
-
         let replacement = mongodb::bson::to_bson(&data)?;
-        let options = mongodb::options::ReplaceOptions::builder()
+        let _ = self.col.replace_one(query, replacement)
             .upsert(true)
-            .build();
-        let _ = self.col.replace_one(query, replacement, options)?;
+            .run()?;
         Ok(())
     }
 
@@ -173,7 +161,7 @@ impl DataSource for MongoDBDataSource {
                 filter = doc! { "name": name, "context": ctx };
             }
         }
-        let _ = self.col.delete_one(filter, None)?;
+        let _ = self.col.delete_one(filter).run()?;
         Ok(())
     }
 
@@ -182,20 +170,20 @@ impl DataSource for MongoDBDataSource {
             .db_client
             .as_ref()
             .unwrap()
-            .list_database_names(None, None)?;
+            .list_database_names().run()?;
         db_names.iter()
             .for_each(|name| {
                 let db = GLOBAL_CFG.db_client.as_ref().unwrap().database(name);
-                db.list_collection_names(None).unwrap()
+                db.list_collection_names().run().unwrap()
                     .iter()
                     .for_each(|col| {
                         let col = db.collection::<Bson>(col);
                         let filter = doc! { "context": context };
-                        let res = col.delete_many(filter, None);
+                        let res = col.delete_many(filter).run();
                         //count deleted
                         if let Ok(res) = res {
                             if res.deleted_count > 0 {
-                                log::info!(target: "", "Deleted {} docs from {} with context {context}.", res.deleted_count, col.name());
+                                info!(target: "", "Deleted {} docs from {} with context {context}.", res.deleted_count, col.name());
                             }
                         }
                     });
@@ -210,49 +198,4 @@ impl DataSource for MongoDBDataSource {
     fn get_context(&self) -> Option<String> {
         self.context.clone()
     }
-
-    // TODO: Remove after usage check
-    // Legacy method for dim defaults
-    // ! Doesn't support context
-    // fn get_data_dim_defaults(&self) -> Result<Value, Box<dyn std::error::Error>> {
-    //     let filter = doc! { "name": self.col_name.clone(), "context": { "$exists": false } };
-    //     let options = mongodb::options::FindOneOptions::builder()
-    //         .max_time(std::time::Duration::from_secs(5))
-    //         .build();
-    //     let col = self.db.collection::<Bson>("defaults");
-    //     let bson = col.find_one(filter, options)?;
-    //     let res = match bson {
-    //         Some(bson) => bson,
-    //         None => return Ok(json!({})),
-    //     };
-    //     let mut res = mongodb::bson::from_bson::<Value>(res)?;
-    //     let data = res["defaults"].take();
-    //     Ok(data)
-    // }
-
-    // Legacy method for dim defaults
-    // ! Doesn't support context
-    // fn upsert_data_dim_defaults(&self, name: &str, data: Value) -> Result<(), Box<dyn std::error::Error>> {
-    //     let query = doc! { "name": name, "context": { "$exists": false } };
-    //     let data = serde_json::json!({
-    //         "name" : name,
-    //         "defaults" : data
-    //     });
-    //
-    //     let col = self.db.collection::<Bson>("defaults");
-    //     let replacement = mongodb::bson::to_bson(&data)?;
-    //     let options = mongodb::options::ReplaceOptions::builder().upsert(true).build();
-    //     let _ = col.replace_one(query, replacement, options)?;
-    //
-    //     Ok(())
-    // }
-
-    // Legacy method for dim defaults
-    // ! Doesn't support context
-    // fn delete_data_dim_defaults(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    //     let filter = doc! { "name": name, "context": { "$exists": false } };
-    //     let col = self.db.collection::<Bson>("defaults");
-    //     let _ = col.delete_one(filter, None)?;
-    //     Ok(())
-    // }
 }

@@ -96,6 +96,7 @@ impl Dim {
                     .file_name()
                     .and_then(std::ffi::OsStr::to_str)
                     .filter(|dir_name| dir_name.starts_with(".default:"))
+                    // .filter(|dir_name| dir_name.starts_with("_default:"))
                     .map(|_| dir)
             })
             .chain(
@@ -214,8 +215,27 @@ impl DimBuilder {
     }
 
     pub fn new_undefined(dim_type: &str) -> Self {
-        let mut null_data = Self::get_null_keys_for_dim(dim_type);
-        null_data["meta"] = Value::Null;
+
+        let storage = match &GLOBAL_CFG.db_client {
+            Some(_) => Storage::DB,
+            None => Storage::FS,
+        };
+
+        let dim = Self::new(dim_type, &GLOBAL_CFG.org, &storage)
+            .read_default_data();
+
+        let null_data: Value = dim.default_data.clone()
+            .as_object_mut()
+            .unwrap_or(&mut serde_json::Map::new())
+            .keys()
+            .map(|key| key.to_string())
+            .filter(|key| !key.starts_with("name"))
+            .map(|key| (key, Value::Null))
+            .collect();
+
+
+        // let mut null_data = Self::get_null_keys_for_dim(dim_type, datasource);
+        // null_data["meta"] = Value::Null;
 
         Self {
             dim_type: dim_type.into(),
@@ -225,25 +245,26 @@ impl DimBuilder {
         }
     }
 
-    fn get_null_keys_for_dim(dim_type: &str) -> Value {
-        let dim_path = Path::new(&GLOBAL_CFG.inventory_path)
-            .join(&GLOBAL_CFG.org)
-            .join(dim_type);
-
-        std::fs::read_dir(dim_path)
-            .unwrap_or_exit(format!("Unable to read optional dim {} from inventory", dim_type))
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .filter(|entry| entry.is_file())
-            .filter_map(|entry| {
-                entry.file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .strip_prefix(".default:")
-                    .map(|key| (key.to_string(), Value::Null))
-            })
-            .collect::<Value>()
-    }
+    // fn get_null_keys_for_dim(dim_type: &str, datasource: Box<dyn DataSource> ) -> Value {
+    //
+    //     let dim_path = Path::new(&GLOBAL_CFG.inventory_path)
+    //         .join(&GLOBAL_CFG.org)
+    //         .join(dim_type);
+    //
+    //     std::fs::read_dir(dim_path)
+    //         .unwrap_or_exit(format!("Unable to read optional dim {} from inventory", dim_type))
+    //         .filter_map(|entry| entry.ok())
+    //         .map(|entry| entry.path())
+    //         .filter(|entry| entry.is_file())
+    //         .filter_map(|entry| {
+    //             entry.file_stem()
+    //                 .unwrap_or_default()
+    //                 .to_string_lossy()
+    //                 .strip_prefix(".default:")
+    //                 .map(|key| (key.to_string(), Value::Null))
+    //         })
+    //         .collect::<Value>()
+    // }
 
     pub fn with_name(mut self, dim_name: &str) -> Self {
         self.dim_name = dim_name.into();
@@ -417,28 +438,34 @@ impl DimBuilder {
     }
 
     pub fn read_default_data(mut self) -> Self {
+        // let defaults_name = self.storage.get_defaults_prefix();
         let data = self
             .datasource
             .get_data_by_name("_default")
             .unwrap_or_default();
+
+        // TODO: remove "data" key usage and read default data as is
+        // self.default_data = data;
         self.default_data = match self.storage {
             Storage::DB => data.get("data").cloned().unwrap_or_default(),
             Storage::FS => data,
         };
+
         self
     }
 
     pub fn save_default_data(&self) {
         let data = self.default_data.clone();
 
-        let data = serde_json::json!({
+        // TODO: remove "data" key usage and save default data as is
+        let data = json!({
             "data" : data
         });
 
         self.datasource
             .upsert_data_by_name("_default", data)
             .unwrap_or_exit(format!(
-                "Error saving default data {} to DB:",
+                "Error saving default data {} to DB",
                 &self.dim_type
             ));
     }

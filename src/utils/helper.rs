@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub fn db_connect(db: &str) -> mongodb::sync::Client {
-    let options = match mongodb::options::ClientOptions::parse(db) {
+    let options = match mongodb::options::ClientOptions::parse(db).run() {
         Ok(client) => client,
         Err(e) => exit_with_error(format!("DB connection error: {e}")),
     };
@@ -279,7 +279,6 @@ pub fn validate_json_by_schema(json: &Value, schema: &Value) -> Option<Value> {
         Err(errors) => {
             let mut error_messages = String::new();
             for error in errors {
-                //error!(target: "", "error: {}", error);
                 error_messages.push_str(&format!("Validation error: {}, ", error));
             }
             None

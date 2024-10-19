@@ -34,7 +34,7 @@ clap = { version = "4", features = ["derive", "cargo", "env"] }
 config = { version = "0.14", features = ["yaml", "toml"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
-jsonschema = "0.21"
+jsonschema = "0.23"
 anyhow = "1.0"
 serde_json = "1"
 semver = "1.0"
@@ -44,8 +44,7 @@ chrono = "0.4"
 rand = "0.8"
 zip = "2.2.0"
 rocket = { version = "0.5", default-features = false, features = ["json"] }
-#lazy_static = "1.5"
-mongodb = { version = "2.8.2", default-features = false, features = ["sync"] }
+mongodb = { version = "3.1.0", features = ["sync", "dns-resolver"] }
 whoami = "1.5"
 log = "0.4"
 env_logger = "0.11.5"

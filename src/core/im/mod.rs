@@ -123,7 +123,8 @@ pub fn get_all_orgs(storage: &Storage) -> Value {
                 .db_client
                 .clone()
                 .unwrap_or_exit("Can't start DB client".into());
-            db.list_database_names(None, None)
+            db.list_database_names()
+                .run()
                 .unwrap_or_exit("Can't read list of orgs from DB".into())
         }
         Storage::FS => GLOBAL_CFG.orgs.clone(),
@@ -170,16 +171,15 @@ pub fn get_dlog(org: &str, filter: Value, limit: Option<i64>) -> Value {
 
     let db = client.unwrap().database(org);
     let col = db.collection::<mongodb::bson::Bson>("dlog");
-    //let col = MongoCollection::new(org, "dlog", &client.unwrap());
-    let options = mongodb::options::FindOptions::builder()
-        .sort(mongodb::bson::doc! { "timestamp": -1 })
-        .limit(limit.unwrap_or(10))
-        .build();
     let filter = to_dot_notation(&filter, "".to_string());
     let filter = json!(filter);
     let filter = mongodb::bson::to_document(&filter).unwrap_or_default();
+    let res = col.find(filter.clone())
+        .sort(mongodb::bson::doc! { "timestamp": -1 })
+        .limit(limit.unwrap_or(10))
+        .run()
+        .unwrap();
 
-    let res = col.find(filter.clone(), options).unwrap();
     let res: Vec<Value> = res
         .collect::<mongodb::error::Result<Vec<mongodb::bson::Bson>>>()
         .unwrap_or_default()
@@ -225,7 +225,7 @@ pub fn get_all_dim_types(org: &str, storage: &Storage) -> Value {
         Storage::DB => {
             let client = GLOBAL_CFG.db_client.clone().unwrap();
             let db = client.database(org);
-            db.list_collection_names(None).unwrap()
+            db.list_collection_names().run().unwrap()
         }
         Storage::FS => GLOBAL_CFG.orgs.clone(),
     }
