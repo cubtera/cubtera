@@ -101,12 +101,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload binary as artifact
+      - name: Upload binaries as artifact
         uses: actions/upload-artifact@v4
         if: ${{ matrix.name == 'linux' }}
         with:
           name: cubtera
-          path: target/${{ matrix.target }}/release/cubtera
+          path: |
+            target/${{ matrix.target }}/release/cubtera
+            target/${{ matrix.target }}/release/cubtera-api
           retention-days: 1
 
   publish_docker:
@@ -119,7 +121,8 @@ jobs:
     if: ${{ needs.release.outputs.release_created }}
     steps:
       - uses: actions/checkout@v4
-      - name: Download linux binary from artifacts
+
+      - name: Download linux binaries from artifacts
         uses: actions/download-artifact@v4
         with:
           name: cubtera
@@ -137,7 +140,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set Docker tags
+      - name: Set CLI Docker tags
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -146,8 +149,8 @@ jobs:
             latest
             ${{ steps.get-tag.outputs.tag_name }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build and push CLI Docker image
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -155,6 +158,27 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             from_image=scratch
+            bin_name=cubtera
+
+      - name: Set API Docker tags
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api
+          tags: |
+            latest
+            ${{ steps.get-tag.outputs.tag_name }}
+
+      - name: Build and push API Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          build-args: |
+            from_image=scratch
+            bin_name=cubtera-api
 
       - name: Trigger Homebrew formula update
         run: |
