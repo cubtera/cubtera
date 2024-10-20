@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.9](https://github.com/cubtera/cubtera/compare/v1.0.8...v1.0.9) (2024-10-20)
+
+
+### Bug Fixes
+
+* add build/push for api docker image ([6a69dd6](https://github.com/cubtera/cubtera/commit/6a69dd6525fc79e8692873ce3f77ab6e9cab3865))
+* api async support new mongodb driver ([fa7df4c](https://github.com/cubtera/cubtera/commit/fa7df4cc15b149db4d2b5bebd829c32c73da8a17))
+* s3 tf state vars broken string ([c25ef95](https://github.com/cubtera/cubtera/commit/c25ef952055b7cde67d44044f7ecb461d1778cd8))
+* upgrade mongodb crate version to 3.1.0 with refactoring ([205efc2](https://github.com/cubtera/cubtera/commit/205efc238ed4bfdfcaab22662dbeba8ef3a3bcdf))
+
 ## [1.0.8](https://github.com/cubtera/cubtera/compare/v1.0.7...v1.0.8) (2024-10-15)
 
 
