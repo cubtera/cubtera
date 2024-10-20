@@ -1,49 +1,78 @@
 use cubtera::prelude::*;
-
 use rocket::serde::json::{json, Value};
 use rocket::{catch, catchers, get, launch, routes, Build, Request, Rocket};
 
 #[get("/<org>/dimTypes")] // -> list of all dim types in org
-fn dim_types(org: &str) -> Value {
-    get_all_dim_types(org, &Storage::DB)
+async fn dim_types(org: &str) -> Value {
+    let org = org.to_string();
+    rocket::tokio::task::spawn_blocking(move || {
+        get_all_dim_types(&org, &Storage::DB)
+    }).await.unwrap()
 }
 
 #[get("/<org>/dims?<type>")] // -> list of dims by type
-fn dims_by_type(r#type: &str, org: &str) -> Value {
-    get_dim_names_by_type(r#type, org, &Storage::DB)
+async fn dims_by_type(r#type: &str, org: &str) -> Value {
+    let org = org.to_string();
+    let dim_type = r#type.to_string();
+    rocket::tokio::task::spawn_blocking(move || {
+        get_dim_names_by_type(&dim_type, &org, &Storage::DB)
+    }).await.unwrap()
 }
 
 #[get("/<org>/dimsData?<type>")] // -> list of dims data by type
-fn dims_data_by_type(r#type: &str, org: &str) -> Value {
-    get_dims_data_by_type(r#type, org, &Storage::DB)
+async fn dims_data_by_type(r#type: &str, org: &str) -> Value {
+    let org = org.to_string();
+    let dim_type = r#type.to_string();
+    rocket::tokio::task::spawn_blocking(move || {
+        get_dims_data_by_type(&dim_type, &org, &Storage::DB)
+    }).await.unwrap()
 }
 
 #[get("/<org>/dim?<type>&<name>&<context>")]
-fn dim_by_name(r#type: &str, name: &str, org: &str, context: Option<String>) -> Value {
-    // -> dim data by type and name
-    get_dim_by_name(r#type, name, org, &Storage::DB, context)
+async fn dim_by_name(r#type: &str, name: &str, org: &str, context: Option<String>) -> Value {
+    let org = org.to_string();
+    let dim_name = name.to_string();
+    let dim_type = r#type.to_string();
+    rocket::tokio::task::spawn_blocking(move || {
+        get_dim_by_name(&dim_type, &dim_name, &org, &Storage::DB, context)
+    }).await.unwrap()
 }
 
 #[get("/<org>/dimDefaults?<type>")]
-fn dim_defaults_by_type(r#type: &str, org: &str) -> Value {
-    // -> dim data by type and name
-    get_dim_defaults_by_type(r#type, org, &Storage::DB)
+async fn dim_defaults_by_type(r#type: &str, org: &str) -> Value {
+    let org = org.to_string();
+    let dim_type = r#type.to_string();
+    rocket::tokio::task::spawn_blocking(move || {
+        get_dim_defaults_by_type(&dim_type, &org, &Storage::DB)
+    }).await.unwrap()
 }
 
 #[get("/<org>/dimParent?<type>&<name>")]
-fn dim_parent(r#type: &str, name: &str, org: &str) -> Value {
-    get_dim_parent(r#type, name, org, &Storage::DB)
+async fn dim_parent(r#type: &str, name: &str, org: &str) -> Value {
+    let org = org.to_string();
+    let dim_name = name.to_string();
+    let dim_type = r#type.to_string();
+    rocket::tokio::task::spawn_blocking(move || {
+        get_dim_parent(&dim_type, &dim_name, &org, &Storage::DB)
+    }).await.unwrap()
 }
 
 #[get("/<org>/dimsByParent?<type>&<name>")]
-fn dims_by_parent(r#type: &str, name: &str, org: &str) -> Value {
-    get_dim_kids(r#type, name, org, &Storage::DB)
+async fn dims_by_parent(r#type: &str, name: &str, org: &str) -> Value {
+    let org = org.to_string();
+    let dim_name = name.to_string();
+    let dim_type = r#type.to_string();
+    rocket::tokio::task::spawn_blocking(move || {
+        get_dim_kids(&dim_type, &dim_name, &org, &Storage::DB)
+    }).await.unwrap()
 }
 
 #[get("/orgs")]
-fn all_orgs(//key: ApiKey<'_> // <- Here we use our ApiKey guard
+async fn all_orgs(//key: ApiKey<'_> // <- Here we use our ApiKey guard
 ) -> Value {
-    get_all_orgs(&Storage::DB)
+    rocket::tokio::task::spawn_blocking(move || {
+        get_all_orgs(&Storage::DB)
+    }).await.unwrap()
 }
 
 #[catch(404)]
@@ -66,9 +95,9 @@ fn health() -> Value {
 
 #[launch]
 pub async fn rocket() -> Rocket<Build> {
-    let _ = GLOBAL_CFG.db_client.clone().unwrap_or_exit(
-        "Can't connect to mongodb. Provide correct connection string with CUBTERA_DB".to_string(),
-    );
+    // let _ = GLOBAL_CFG.db_client.clone().unwrap_or_exit(
+    //     "Can't connect to mongodb. Provide correct connection string with CUBTERA_DB".to_string(),
+    // );
     rocket::build()
         .mount(
             "/v1",
