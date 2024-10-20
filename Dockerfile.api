@@ -1,0 +1,11 @@
+FROM ubuntu:latest AS builder
+USER root
+WORKDIR /cubtera
+COPY ./cubtera ./
+RUN chmod +x /cubtera/cubtera-api
+
+FROM scratch
+COPY --from=builder ./cubtera/cubtera-api /
+EXPOSE 8000
+USER 1000
+ENTRYPOINT ["/cubtera-api"]

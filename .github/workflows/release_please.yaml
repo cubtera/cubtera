@@ -153,12 +153,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./Dockerfile.cli
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            from_image=scratch
-            bin_name=cubtera
 
       - name: Set API Docker tags
         id: meta-api
@@ -173,12 +171,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./Dockerfile.api
           push: true
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
-          build-args: |
-            from_image=scratch
-            bin_name=cubtera-api
 
       - name: Trigger Homebrew formula update
         run: |

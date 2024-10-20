@@ -1,0 +1,10 @@
+FROM ubuntu:latest AS builder
+USER root
+WORKDIR /cubtera
+COPY ./cubtera ./
+RUN chmod +x /cubtera/cubtera
+
+FROM scratch
+COPY --from=builder ./cubtera/cubtera /
+USER 1000
+ENTRYPOINT ["/cubtera"]
