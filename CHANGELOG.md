@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.10](https://github.com/cubtera/cubtera/compare/v1.0.9...v1.0.10) (2024-10-21)
+
+
+### Bug Fixes
+
+* docker images build ([f085413](https://github.com/cubtera/cubtera/commit/f0854133584cbdda67c61821158d151108759385))
+* remove unit_manifest.json processing ([c78d0e1](https://github.com/cubtera/cubtera/commit/c78d0e193fa7139bcc5d6861f21906746ef2a707))
+* temp remove default local state config (for migration) ([d0625e9](https://github.com/cubtera/cubtera/commit/d0625e9b0584fb1dee639dc0f98a3f337dd7627d))
+
 ## [1.0.9](https://github.com/cubtera/cubtera/compare/v1.0.8...v1.0.9) (2024-10-20)
 
 
