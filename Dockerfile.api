@@ -1,7 +1,7 @@
 FROM ubuntu:latest AS builder
 USER root
 WORKDIR /cubtera
-COPY ./cubtera ./
+COPY ./cubtera-api ./
 RUN chmod +x /cubtera/cubtera-api
 
 FROM scratch
