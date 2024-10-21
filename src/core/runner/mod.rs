@@ -212,11 +212,17 @@ impl RunnerBuilder {
             .and_then(|s| s.get(state_type).cloned())
             .or(self.unit.manifest.state.clone())
             .map_or_else(
-                || json!({
-                    "local": {
-                        "path": string_to_path("~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate"),
-                    }
-                }),
+                ||
+                    // json!({
+                    //     "local": {
+                    //         "path": string_to_path("~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate"),
+                    //     }
+                    // }),
+
+                    // TODO: remove after migration to new state backend config
+                    exit_with_error("State backend config is not defined in global config or unit manifest. \
+                        Check documentation about supported state backends".into()),
+
                 |state| {
                     if state_type == "local" {
                         json!({
