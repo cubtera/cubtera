@@ -30,25 +30,12 @@ pub struct Manifest {
 impl Manifest {
     pub fn load(path: &Path) -> Result<Self> {
         let toml_path = path.join("manifest.toml");
-        if toml_path.exists() {
-            let toml = std::fs::read_to_string(&toml_path)
-                .context(format!("Failed to read unit manifest at {:?}", toml_path))?;
-            toml::from_str::<Manifest>(&toml)
-                .context(format!("Failed to parse manifest at {:?}", toml_path))
-        } else {
-            //TODO: Remove legacy manifest in future versions
-            let json_path = path.join("unit_manifest.json");
-            let json = std::fs::read_to_string(&json_path)
-                .context(format!("Failed to read unit manifest at {:?}", json_path))?;
-            serde_json::from_str::<Manifest>(&json)
-                .context(format!("Failed to parse manifest at {:?}", json_path))
-        }
 
-        // let manifest_path = path.join("unit_manifest.json");
-        // let manifest = std::fs::read_to_string(&manifest_path)
-        //     .context(format!("Failed to read unit manifest at {:?}", manifest_path))?;
-        // serde_json::from_str::<Manifest>(&manifest)
-        //     .context(format!("Failed to parse manifest at {:?}", manifest_path))
+        let toml = std::fs::read_to_string(&toml_path)
+            .context(format!("Failed to read unit manifest at {:?}", toml_path))?;
+
+        toml::from_str::<Manifest>(&toml)
+            .context(format!("Failed to parse manifest at {:?}", toml_path))
     }
 }
 
