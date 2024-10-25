@@ -5,7 +5,7 @@ use cubtera::prelude::data::*;
 
 pub fn get_command() -> Command {
     Command::new("log")
-        .about("Unit deployment log commands")
+        .about("Deployment log commands")
         .subcommand_required(true)
         .subcommands([Command::new("get")
             .about("Get logs of unit deployments")

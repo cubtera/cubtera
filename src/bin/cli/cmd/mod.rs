@@ -16,6 +16,12 @@ pub fn get_matches() -> ArgMatches {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .trailing_var_arg(true)
+        .styles(clap::builder::Styles::styled()
+            .header(clap::builder::styling::AnsiColor::Yellow.on_default())
+            .literal(clap::builder::styling::AnsiColor::Green.on_default())
+            .placeholder(clap::builder::styling::AnsiColor::Green.on_default())
+            .usage(clap::builder::styling::AnsiColor::Yellow.on_default()),
+        )
         .subcommand(im_command::get_command())
         .subcommand(log_command::get_command())
         .subcommand(run_command::get_command())

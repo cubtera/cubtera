@@ -29,7 +29,7 @@ fn get_context_arg() -> Arg {
 
 pub fn get_command() -> Command {
     Command::new("im")
-        .about("Run inventory management commands")
+        .about("Inventory management commands")
         .subcommand_help_heading("Available commands")
         .subcommand_value_name("COMMAND")
         .subcommand_required(true)
