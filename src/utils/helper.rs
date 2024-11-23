@@ -3,6 +3,43 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+pub fn get_blob_sha_by_path(path: &PathBuf) ->  Result<String, git2::Error> {
+    // Open the repository
+    let repo = git2::Repository::discover(path)?;
+
+    // Get the HEAD commit
+    let head = repo.head()?;
+    let commit = head.peel_to_commit()?;
+
+    // Get the tree from the commit
+    let tree = commit.tree()?;
+
+    // Convert the path to a Path object
+    let path = Path::new(path);
+
+    // Get the tree entry for the path
+    let entry = tree.get_path(path)?;
+
+    // Get the object ID (SHA) of the entry
+    let entry_sha = entry.id().to_string();
+
+    Ok(entry_sha)
+}
+
+pub fn get_commit_sha_by_path(path_buf: &PathBuf) -> Result<String, git2::Error> {
+    // Open the repository
+    let repo = git2::Repository::discover(path_buf)?;
+
+    // Get the HEAD commit
+    let head = repo.head()?;
+    let commit = head.peel_to_commit()?;
+
+    // Get the commit ID (SHA)
+    let commit_sha = commit.id().to_string();
+
+    Ok(commit_sha)
+}
+
 pub fn db_connect(db: &str) -> mongodb::sync::Client {
     let options = match mongodb::options::ClientOptions::parse(db).run() {
         Ok(client) => client,
