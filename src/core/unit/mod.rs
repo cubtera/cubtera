@@ -19,7 +19,7 @@ pub struct Unit {
     pub manifest: Manifest,
     pub temp_folder: PathBuf,
     pub extensions: Vec<String>,
-    dimensions: Vec<Dim>,
+    pub dimensions: Vec<Dim>,
     opt_dims: Option<Vec<Dim>>,
     unit_folder: PathBuf,
     generic_unit_folder: Option<PathBuf>,
