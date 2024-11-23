@@ -40,6 +40,36 @@ pub fn get_commit_sha_by_path(path_buf: &PathBuf) -> Result<String, git2::Error>
     Ok(commit_sha)
 }
 
+pub fn get_sha_by_value(value: &Value) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    let ordered = order_json(value);
+    let canonical_json = serde_json::to_string(&ordered).unwrap_or_default();
+    hasher.update(canonical_json.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn order_json(value: &Value) -> Value {
+    use std::collections::BTreeMap;
+    match value {
+        Value::Object(map) => {
+            let ordered: BTreeMap<_, _> = map
+                .iter()
+                .map(|(k, v)| (k.clone(), order_json(v)))
+                .collect();
+            Value::Object(ordered.into_iter().collect())
+        }
+        Value::Array(arr) => {
+            let mut ordered: Vec<Value> = arr.iter().map(order_json).collect();
+            if ordered.iter().all(|v| v.is_number() || v.is_string()) {
+                ordered.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+            }
+            Value::Array(ordered)
+        }
+        _ => value.clone(),
+    }
+}
+
 pub fn db_connect(db: &str) -> mongodb::sync::Client {
     let options = match mongodb::options::ClientOptions::parse(db).run() {
         Ok(client) => client,
