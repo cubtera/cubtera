@@ -348,6 +348,22 @@ impl Unit {
     pub fn get_name(self) -> String {
         self.name
     }
+
+    pub fn get_unit_blob_sha(self) -> String {
+        let sha = get_blob_sha_by_path(&self.unit_folder);
+        sha.unwrap_or_else(|e| {
+            warn!("Failed to get unit blob sha: {e}");
+            "undefined".to_string()
+        })
+    }
+
+    pub fn get_unit_commit_sha(self) -> String {
+        let sha = get_commit_sha_by_path(&self.unit_folder);
+        sha.unwrap_or_else(|e| {
+            warn!("Failed to get unit commit sha: {e}");
+            "undefined".to_string()
+        })
+    }
 }
 
 fn copy_files_from_manifest(
