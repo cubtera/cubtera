@@ -7,18 +7,25 @@ pub fn get_blob_sha_by_path(path: &PathBuf) ->  Result<String, git2::Error> {
     // Open the repository
     let repo = git2::Repository::discover(path)?;
 
+    // Get the repository's workdir (root directory)
+    let repo_root = repo.workdir().ok_or_else(|| {
+        git2::Error::from_str("Could not get repository working directory")
+    })?;
+
+    // Convert the absolute path to a path relative to the repository root
+    let relative_path = path.strip_prefix(repo_root).map_err(|_| {
+        git2::Error::from_str("Failed to get relative path")
+    })?;
+
     // Get the HEAD commit
     let head = repo.head()?;
     let commit = head.peel_to_commit()?;
-
+    
     // Get the tree from the commit
     let tree = commit.tree()?;
-
-    // Convert the path to a Path object
-    let path = Path::new(path);
-
-    // Get the tree entry for the path
-    let entry = tree.get_path(path)?;
+    
+    // Get the tree entry for the relative_path
+    let entry = tree.get_path(relative_path)?;
 
     // Get the object ID (SHA) of the entry
     let entry_sha = entry.id().to_string();
