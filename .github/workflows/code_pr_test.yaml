@@ -23,7 +23,7 @@ jobs:
       - name: Pre-build install dependencies
         run: |
           sudo apt update
-          sudo apt install -y -qq musl musl-dev musl-tools linux-musl-dev
+          sudo apt install -y -qq musl musl-dev musl-tools
           sudo update-ca-certificates
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           export PATH=$PATH:$HOME/.cargo/bin
