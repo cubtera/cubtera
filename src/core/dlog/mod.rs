@@ -6,7 +6,7 @@ use crate::utils::helper::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dlog {
@@ -31,7 +31,13 @@ pub struct Dlog {
     #[serde(skip_serializing_if = "Option::is_none")]
     unit_sha: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    unit_blob_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     inventory_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dims_blob_sha: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    env_vars: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     timestamp: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,6 +82,26 @@ impl Dlog {
             .clone()
             .and_then(|var| std::env::var(var).ok())
             .unwrap_or("undefined".into());
+        let unit_commit_sha = unit.clone().get_unit_commit_sha();
+        let inventory_commit_sha = get_commit_sha_by_path(
+            &Path::new(&GLOBAL_CFG.inventory_path).to_path_buf()
+        ).unwrap_or("undefined".into());
+
+        let unit_blob_sha = unit.clone().get_unit_blob_sha();
+        let dims_blob_sha = unit.clone().dimensions
+            .iter()
+            .map(|dim| (format!("{}:{}", dim.dim_type, dim.dim_name),dim.clone().data_sha))
+            .collect::<HashMap<String, String>>();
+
+        let env_vars =  unit.clone().manifest.spec
+            .and_then(|spec| spec.env_vars)
+            .map(|env_vars| {
+                env_vars.optional.iter().flatten()
+                    .chain(env_vars.required.iter().flatten())
+                    .map(|(_, v)| std::env::var(v).ok().map(|val| (v.clone(), val)))
+                    .flatten()
+                    .collect::<HashMap<String, String>>()
+            });
 
         Self {
             unit_name: Some(unit.get_name()),
@@ -87,15 +113,14 @@ impl Dlog {
             job_name: Some(job_name),
             tf_command: Some(tf_command),
             exitcode: Some(exitcode),
-            unit_sha: Some(git_sha_by_path(
-                Path::new(&GLOBAL_CFG.units_path).to_path_buf(),
-            )),
-            inventory_sha: Some(git_sha_by_path(
-                Path::new(&GLOBAL_CFG.inventory_path).to_path_buf(),
-            )),
+            unit_sha: Some(unit_commit_sha),
+            unit_blob_sha: Some(unit_blob_sha),
+            inventory_sha: Some(inventory_commit_sha),
+            dims_blob_sha: Some(dims_blob_sha),
             timestamp: Some(timestamp),
             datetime: Some(hr_time.to_string()),
             extended_log: get_extended_log(),
+            env_vars,
         }
     }
 
@@ -145,69 +170,3 @@ fn get_extended_log() -> Option<HashMap<String, String>> {
     }
     None
 }
-
-/// Returns the SHA of the HEAD commit in the Git repository located at the given path.
-/// If the SHA cannot be determined, returns "undefined".
-///
-/// # Arguments
-///
-/// * `path` - A `PathBuf` representing the path to the Git repository.
-fn git_sha_by_path(path: PathBuf) -> String {
-    let output = std::process::Command::new("git")
-        .arg("rev-parse")
-        .arg("HEAD")
-        .current_dir(&path)
-        .output();
-    match output {
-        Ok(output) => {
-            let sha = String::from_utf8(output.stdout).unwrap_or("undefined".into());
-            sha.trim().to_string()
-        }
-        Err(_) => "undefined".into(),
-    }
-}
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     #[test]
-//     fn test_git_sha_by_path() {
-//         let dir = tempfile::tempdir().unwrap();
-//         let path = dir.path().join("test");
-//         std::fs::write(&path, "test").unwrap();
-//
-//         let output = std::process::Command::new("git")
-//             .arg("init")
-//             .current_dir(&dir)
-//             .output()
-//             .unwrap();
-//         assert!(output.status.success());
-//
-//         let output = std::process::Command::new("git")
-//             .arg("add")
-//             .arg(&path)
-//             .current_dir(&dir)
-//             .output()
-//             .unwrap();
-//         assert!(output.status.success());
-//
-//         let output = std::process::Command::new("git")
-//             .arg("commit")
-//             .arg("-m")
-//             .arg("test")
-//             .current_dir(&dir)
-//             .output()
-//             .unwrap();
-//         assert!(output.status.success());
-//
-//         let sha = git_sha_by_path(dir.path().to_path_buf());
-//         assert_ne!(&sha, "undefined");
-//     }
-//
-//     #[test]
-//     fn test_git_sha_by_path_invalid_path() {
-//         let path = PathBuf::from("/invalid/path");
-//         let sha = git_sha_by_path(path);
-//         assert_eq!(&sha, "undefined");
-//     }
-// }

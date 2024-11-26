@@ -19,7 +19,7 @@ pub struct Unit {
     pub manifest: Manifest,
     pub temp_folder: PathBuf,
     pub extensions: Vec<String>,
-    dimensions: Vec<Dim>,
+    pub dimensions: Vec<Dim>,
     opt_dims: Option<Vec<Dim>>,
     unit_folder: PathBuf,
     generic_unit_folder: Option<PathBuf>,
@@ -347,6 +347,22 @@ impl Unit {
 
     pub fn get_name(self) -> String {
         self.name
+    }
+
+    pub fn get_unit_blob_sha(self) -> String {
+        let sha = get_blob_sha_by_path(&self.unit_folder);
+        sha.unwrap_or_else(|e| {
+            warn!("Failed to get unit blob sha: {e}");
+            "undefined".to_string()
+        })
+    }
+
+    pub fn get_unit_commit_sha(self) -> String {
+        let sha = get_commit_sha_by_path(&self.unit_folder);
+        sha.unwrap_or_else(|e| {
+            warn!("Failed to get unit commit sha: {e}");
+            "undefined".to_string()
+        })
     }
 }
 

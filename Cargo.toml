@@ -20,6 +20,7 @@ exclude = [
 [lib]
 name = "cubtera"
 path = "src/lib.rs"
+doctest = false
 
 [[bin]]
 name = "cubtera-api"
@@ -29,11 +30,18 @@ path = "src/bin/api/main.rs"
 name = "cubtera"
 path = "src/bin/cli/main.rs"
 
+# The public documentation is minimal and doesn't change between
+# platforms, so we only build them for linux on docs.rs to save
+# their build machines some cycles.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
 [dependencies]
 clap = { version = "4", features = ["derive", "cargo", "env"] }
 config = { version = "0.14", features = ["yaml", "toml"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
+openssl = { version = "0.10", features = ["vendored"] }
 jsonschema = "0.23"
 anyhow = "1.0"
 serde_json = "1"
@@ -52,6 +60,8 @@ libc = "0.2.155"
 once_cell = "1.19.0"
 yansi = "1.0.1"
 handlebars = "6.1.0"
+git2 = "0.19"
+sha2 = "0.10.8"
 
 [dev-dependencies]
 mockall = "0.13"

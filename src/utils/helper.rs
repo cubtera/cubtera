@@ -3,6 +3,80 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+pub fn get_blob_sha_by_path(path: &PathBuf) ->  Result<String, git2::Error> {
+    // Open the repository
+    let repo = git2::Repository::discover(path)?;
+
+    // Get the repository's workdir (root directory)
+    let repo_root = repo.workdir().ok_or_else(|| {
+        git2::Error::from_str("Could not get repository working directory")
+    })?;
+
+    // Convert the absolute path to a path relative to the repository root
+    let relative_path = path.strip_prefix(repo_root).map_err(|_| {
+        git2::Error::from_str("Failed to get relative path")
+    })?;
+
+    // Get the HEAD commit
+    let head = repo.head()?;
+    let commit = head.peel_to_commit()?;
+    
+    // Get the tree from the commit
+    let tree = commit.tree()?;
+    
+    // Get the tree entry for the relative_path
+    let entry = tree.get_path(relative_path)?;
+
+    // Get the object ID (SHA) of the entry
+    let entry_sha = entry.id().to_string();
+
+    Ok(entry_sha)
+}
+
+pub fn get_commit_sha_by_path(path_buf: &PathBuf) -> Result<String, git2::Error> {
+    // Open the repository
+    let repo = git2::Repository::discover(path_buf)?;
+
+    // Get the HEAD commit
+    let head = repo.head()?;
+    let commit = head.peel_to_commit()?;
+
+    // Get the commit ID (SHA)
+    let commit_sha = commit.id().to_string();
+
+    Ok(commit_sha)
+}
+
+pub fn get_sha_by_value(value: &Value) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    let ordered = order_json(value);
+    let canonical_json = serde_json::to_string(&ordered).unwrap_or_default();
+    hasher.update(canonical_json.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn order_json(value: &Value) -> Value {
+    use std::collections::BTreeMap;
+    match value {
+        Value::Object(map) => {
+            let ordered: BTreeMap<_, _> = map
+                .iter()
+                .map(|(k, v)| (k.clone(), order_json(v)))
+                .collect();
+            Value::Object(ordered.into_iter().collect())
+        }
+        Value::Array(arr) => {
+            let mut ordered: Vec<Value> = arr.iter().map(order_json).collect();
+            if ordered.iter().all(|v| v.is_number() || v.is_string()) {
+                ordered.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+            }
+            Value::Array(ordered)
+        }
+        _ => value.clone(),
+    }
+}
+
 pub fn db_connect(db: &str) -> mongodb::sync::Client {
     let options = match mongodb::options::ClientOptions::parse(db).run() {
         Ok(client) => client,

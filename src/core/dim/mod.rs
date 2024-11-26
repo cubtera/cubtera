@@ -15,6 +15,7 @@ pub struct Dim {
     dim_path: PathBuf,
     pub parent: Option<Box<Dim>>,
     data: Value,
+    pub data_sha: String,
 }
 
 impl Dim {
@@ -365,11 +366,14 @@ impl DimBuilder {
 
         self.data["name"] = Value::String(self.dim_name.clone());
 
+        let data_sha = get_sha_by_value(&self.data);
+
         Dim {
             dim_name: self.dim_name,
             dim_type: self.dim_type,
             dim_path: self.dim_path,
             data: self.data,
+            data_sha,
             key_path,
             parent,
         }
