@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.11](https://github.com/cubtera/cubtera/compare/v1.0.10...v1.0.11) (2024-11-26)
+
+
+### Bug Fixes
+
+* add some cli colors ([6100edd](https://github.com/cubtera/cubtera/commit/6100edd0c95d34b687f9ed963daec2570f077fec))
+* dlog extension ([#30](https://github.com/cubtera/cubtera/issues/30)) ([1daa49c](https://github.com/cubtera/cubtera/commit/1daa49c62a99902e61ed588ee54707b77ee154dc))
+
 ## [1.0.10](https://github.com/cubtera/cubtera/compare/v1.0.9...v1.0.10) (2024-10-21)
 
 
