@@ -39,21 +39,24 @@ impl Runner for TfRunner {
 
     fn copy_files(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         info!(target: "tf runner", "Copy files to: {}", &self.load.unit.temp_folder.to_string_lossy().blue());
-        if self.load.command.first().unwrap_or(&"".into()).as_str() == "init" {
-            debug!(target: "tf runner", "Unit temp folder was created: \n{:?}", &self.load.unit.temp_folder);
-            self.load.unit.remove_temp_folder();
-            self.load.unit.copy_files();
-            self.create_state_backend()?;
-        } else {
-            if !self.load.unit.temp_folder.exists() {
-                exit_with_error(format!(
-                    "Can't find unit temp folder {:?}. Run init command first.",
-                    &self.load.unit.temp_folder
-                ));
-            }
-            if GLOBAL_CFG.always_copy_files {
+
+        match self.load.command.first() {
+            Some(command) if command == "init" => {
+                self.load.unit.remove_temp_folder();
                 self.load.unit.copy_files();
                 self.create_state_backend()?;
+            }
+            _ => {
+                if !self.load.unit.temp_folder.exists() {
+                    exit_with_error(format!(
+                        "Can't find unit temp folder {:?}. Run init command first.",
+                        &self.load.unit.temp_folder
+                    ));
+                }
+                if GLOBAL_CFG.always_copy_files {
+                    self.load.unit.copy_files();
+                    self.create_state_backend()?;
+                }
             }
         }
 
@@ -61,7 +64,7 @@ impl Runner for TfRunner {
     }
 
     fn change_files(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        debug!(target: "tf runner", "Change dimension data files into terraform format");
+        debug!(target: "tf runner", "Convert dims data files into terraform format");
 
         // read all files started with dim_ and json extension
         let files = std::fs::read_dir(&self.load.unit.temp_folder)
@@ -90,7 +93,7 @@ impl Runner for TfRunner {
                     .unwrap_or_default()
                     .contains(".auto.tfvars")
             })
-            .collect::<Vec<std::path::PathBuf>>();
+            .collect::<Vec<PathBuf>>();
 
         // for each file read json as value and create list of root keys
         #[allow(clippy::format_collect)]
@@ -133,14 +136,11 @@ impl Runner for TfRunner {
 
     fn runner(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut tf_args: Vec<String> = Vec::new();
+        // tf_args.extend(self.tf_vars_args());
 
         if let Some(command) = self.load.command.first() {
             match command.as_str() {
-                "init" => {
-                    // tf_args.extend(self.tf_backend_conf_args());
-                    // debug!(target: "tf runner", "Unit temp folder was created: \n{:?}", &self.load.unit.temp_folder);
-                }
-                "plan" | "apply" | "destroy" | "refresh" => {
+                "plan" | "apply" | "destroy" | "refresh" | "console" | "import" => {
                     // check if unit temp folder is not empty
                     if !self.load.unit.temp_folder.exists() {
                         exit_with_error(format!(

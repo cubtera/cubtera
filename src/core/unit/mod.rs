@@ -219,6 +219,7 @@ impl Unit {
     pub fn copy_files(&self) {
         // define destination temp folder
         let dest_folder = self.temp_folder.clone();
+        debug!(target: "unit mod", "Copying files to temp folder: \n{:?}", dest_folder);
         if !dest_folder.exists() {
             std::fs::create_dir_all(&dest_folder)
                 .unwrap_or_exit(format!("Can't create temp folder: {:?}", &dest_folder));
