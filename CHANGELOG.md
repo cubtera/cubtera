@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.12](https://github.com/cubtera/cubtera/compare/v1.0.11...v1.0.12) (2024-12-09)
+
+
+### Bug Fixes
+
+* add env vars for all tf commands ([05afdf0](https://github.com/cubtera/cubtera/commit/05afdf0f008b553a4c90b1ab3c21f7f1e2f61f7a))
+
 ## [1.0.11](https://github.com/cubtera/cubtera/compare/v1.0.10...v1.0.11) (2024-11-26)
 
 
