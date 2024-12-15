@@ -4,3 +4,4 @@ pub mod dlog;
 pub mod im;
 pub mod runner;
 pub mod unit;
+mod bom;
