@@ -344,20 +344,7 @@ pub fn group_tuples(tuples: Vec<(String, String)>) -> HashMap<String, Vec<String
 /// ```
 pub fn validate_json_by_schema(json: &Value, schema: &Value) -> Option<Value> {
     let validator = jsonschema::validator_for(schema).unwrap();
-    let result = validator.validate(json);
-
-    match result {
-        Ok(_) => {
-            Some(json.clone())
-        }
-        Err(errors) => {
-            let mut error_messages = String::new();
-            for error in errors {
-                error_messages.push_str(&format!("Validation error: {}, ", error));
-            }
-            None
-        }
-    }
+    validator.validate(json).ok().map(|_| json.clone())
 }
 
 /// Reads and validates a JSON file against a JSON schema file.
@@ -388,18 +375,16 @@ pub fn read_and_validate_json(json_path: PathBuf, schema_path: PathBuf) -> Optio
         .unwrap_or_exit(format!("Can't read json: {:?}", &json_path));
     let json = serde_json::from_str::<Value>(&json_data)
         .unwrap_or_exit(format!("Can't parse json: {:?}", json_path));
-
-    let result = validator.validate(&json);
-
-    match result {
-        Ok(_) => Some(json.clone()),
-        Err(errors) => {
-            for error in errors {
-                println!("Validation error: {}", error);
-            }
-            exit_with_error(format!("File: {:?}", json_path));
+    
+    if ! validator.is_valid(&json) {
+        let errors = validator.iter_errors(&json);
+        for error in errors {
+            println!("Validation error: {}", error);
         }
+        exit_with_error(format!("File: {:?}", json_path)); 
     }
+    
+    Some(json)
 }
 
 /// # Panics
