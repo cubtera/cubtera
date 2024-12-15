@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.13](https://github.com/cubtera/cubtera/compare/v1.0.12...v1.0.13) (2024-12-15)
+
+
+### Bug Fixes
+
+* jsonschema crate version breaking change ([5b2060e](https://github.com/cubtera/cubtera/commit/5b2060ea58838d07bb30585f23f062a2581b20da))
+
 ## [1.0.12](https://github.com/cubtera/cubtera/compare/v1.0.11...v1.0.12) (2024-12-09)
 
 
