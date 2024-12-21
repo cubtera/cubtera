@@ -305,6 +305,16 @@ impl TfRunner {
         env_vars.insert("TF_VAR_unit_name".into(), self.load.unit.name.clone());
         env_vars.insert("TF_VAR_dim_tree".into(), self.load.unit.get_unit_state_path());
 
+        let kids: Vec<_> = self.load.unit.dimensions
+            .iter()
+            .filter_map(|dim| dim.kids.clone())
+            .flatten()
+            .collect();
+
+        if !kids.is_empty() {
+            env_vars.insert("TF_VAR_dim_kids".into(), kids.join(", "));
+        }
+
         // add S3 state backend vars (LEGACY)
         if let Some(state) = self.load.state_backend.get("s3") {
             env_vars.insert("TF_VAR_tf_state_s3bucket".into(), state.get("bucket")

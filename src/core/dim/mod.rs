@@ -5,6 +5,7 @@ use crate::prelude::*;
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::ops::Not;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default)]
@@ -16,6 +17,7 @@ pub struct Dim {
     pub parent: Option<Box<Dim>>,
     data: Value,
     pub data_sha: String,
+    pub kids: Option<Vec<String>>,
 }
 
 impl Dim {
@@ -284,7 +286,7 @@ impl DimBuilder {
 
     pub fn get_all_kids_by_name(&self) -> HashMap<String, Vec<String>> {
         if GLOBAL_CFG.dim_relations.is_empty() {
-            warn!("No dim_relations found in config");
+            warn!("No dim_relations found in config for {}:{}", &self.dim_type, &self.dim_name);
             return HashMap::new();
         }
         let child_index = GLOBAL_CFG
@@ -355,6 +357,11 @@ impl DimBuilder {
             None => None,
         };
 
+        let kids: Vec<String> = self.get_all_kids_by_name()
+            .into_iter()
+            .flat_map(|(k, v)| v.into_iter().map(move |x| format!("{}:{}", k, x)))
+            .collect();
+
         // ------------------ state key path ------------------
         // recursively combine parent path with current dim path
         // schema: ".../{parent_dim_type}:{parent_dim_name}/{dim_type}:{dim_name}"
@@ -376,6 +383,7 @@ impl DimBuilder {
             data_sha,
             key_path,
             parent,
+            kids: kids.is_empty().not().then(|| kids),
         }
     }
 
