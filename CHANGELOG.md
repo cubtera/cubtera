@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.13](https://github.com/cubtera/cubtera/compare/v1.0.12...v1.0.13) (2024-12-21)
+
+
+### Bug Fixes
+
+* add kids env var for TF units ([a4d9944](https://github.com/cubtera/cubtera/commit/a4d9944fc92c7a5e3b887bec428cd3af019c127b))
+* jsonschema crate version breaking change ([5b2060e](https://github.com/cubtera/cubtera/commit/5b2060ea58838d07bb30585f23f062a2581b20da))
+
 ## [1.0.12](https://github.com/cubtera/cubtera/compare/v1.0.11...v1.0.12) (2024-12-09)
 
 
