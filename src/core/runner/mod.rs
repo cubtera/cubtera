@@ -161,6 +161,11 @@ pub trait Runner {
             let exit_code = execute_command(&command, &dir, env_vars)?;
 
             self.update_ctx(&format!("{}_exit_code", step), json!(exit_code.code()));
+            if exit_code.success() {
+                debug!(target: "runner", "{} command executed successfully", capitalize_first(step));
+            } else {
+                exit_with_error(format!("{} command failed with {}", capitalize_first(step), exit_code));
+            }
         }
 
         Ok(())
