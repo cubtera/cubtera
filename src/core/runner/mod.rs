@@ -154,7 +154,12 @@ pub trait Runner {
         if let Some::<String>(command) = command {
             self.update_ctx(step, json!(format!("{}", &command)));
             info!(target: "runner", "{} command: {}", capitalize_first(step), &command.blue());
-            let exit_code = execute_command(&command, &dir)?;
+
+            let mut env_vars = std::env::vars().collect::<HashMap<String, String>>();
+            env_vars.insert("CUBTERA_RUNNER_CMD".into(), self.get_load().command.join(" "));
+
+            let exit_code = execute_command(&command, &dir, env_vars)?;
+
             self.update_ctx(&format!("{}_exit_code", step), json!(exit_code.code()));
         }
 

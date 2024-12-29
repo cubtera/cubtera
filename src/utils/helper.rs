@@ -485,6 +485,7 @@ pub fn string_to_path(s: &str) -> PathBuf {
 pub fn execute_command(
     command: &str,
     current_dir: &str,
+    env_vars: HashMap<String, String>,
 ) -> Result<ExitStatus, Box<dyn std::error::Error>> {
     let mut command = command.split_whitespace();
     let binary = command.next().unwrap_or_exit("Command is empty".into());
@@ -494,6 +495,7 @@ pub fn execute_command(
     let mut process = std::process::Command::new(path)
         .current_dir(current_dir)
         .args(args)
+        .envs(env_vars)
         .spawn()?;
 
     let result = process.wait();
