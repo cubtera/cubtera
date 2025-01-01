@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.13](https://github.com/cubtera/cubtera/compare/v1.0.12...v1.0.13) (2025-01-01)
+
+
+### Bug Fixes
+
+* add kids env var for TF units ([a4d9944](https://github.com/cubtera/cubtera/commit/a4d9944fc92c7a5e3b887bec428cd3af019c127b))
+* add runner cmd as env_var propagation into inlet/outlet processes ([69c66bd](https://github.com/cubtera/cubtera/commit/69c66bde3282ef3d9605b00227dedf9db4077184))
+* add runner failure with exit code if outlet/inlet fails ([d446781](https://github.com/cubtera/cubtera/commit/d446781f757002d33ea7d322e5b3a38a3e82646e))
+* **dependabot:** update config requirement from 0.14 to 0.15 ([#34](https://github.com/cubtera/cubtera/issues/34)) ([4150b6e](https://github.com/cubtera/cubtera/commit/4150b6e670b3508b94f99a8520930aeb47f92c09))
+* **dependabot:** update jsonschema requirement from 0.26 to 0.28 ([#33](https://github.com/cubtera/cubtera/issues/33)) ([4d283fe](https://github.com/cubtera/cubtera/commit/4d283fed3bb9296700c3a62fa3bf77219b955465))
+* jsonschema crate version breaking change ([5b2060e](https://github.com/cubtera/cubtera/commit/5b2060ea58838d07bb30585f23f062a2581b20da))
+
 ## [1.0.12](https://github.com/cubtera/cubtera/compare/v1.0.11...v1.0.12) (2024-12-09)
 
 
