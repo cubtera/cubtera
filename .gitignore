@@ -26,6 +26,10 @@ example/.tmp
 .cubtera
 .env
 
+# ZED editor
+.zedstate
+.zed
+
 # MacOS
 ### General
 .DS_Store
