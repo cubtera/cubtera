@@ -82,26 +82,14 @@ impl Dlog {
             .clone()
             .and_then(|var| std::env::var(var).ok())
             .unwrap_or("undefined".into());
-        let unit_commit_sha = unit.clone().get_unit_commit_sha();
+
         let inventory_commit_sha = get_commit_sha_by_path(
             &Path::new(&GLOBAL_CFG.inventory_path).to_path_buf()
         ).unwrap_or("undefined".into());
-
-        let unit_blob_sha = unit.clone().get_unit_blob_sha();
-        let dims_blob_sha = unit.clone().dimensions
-            .iter()
-            .map(|dim| (format!("{}:{}", dim.dim_type, dim.dim_name),dim.clone().data_sha))
-            .collect::<HashMap<String, String>>();
-
-        let env_vars =  unit.clone().manifest.spec
-            .and_then(|spec| spec.env_vars)
-            .map(|env_vars| {
-                env_vars.optional.iter().flatten()
-                    .chain(env_vars.required.iter().flatten())
-                    .map(|(_, v)| std::env::var(v).ok().map(|val| (v.clone(), val)))
-                    .flatten()
-                    .collect::<HashMap<String, String>>()
-            });
+        let unit_commit_sha = unit.get_unit_commit_sha();
+        let unit_blob_sha = unit.get_unit_blob_sha();
+        let dims_blob_sha = unit.get_dims_blob_sha();
+        let env_vars =  unit.get_env_vars();
 
         Self {
             unit_name: Some(unit.get_name()),

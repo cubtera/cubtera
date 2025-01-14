@@ -346,11 +346,11 @@ impl Unit {
         }
     }
 
-    pub fn get_name(self) -> String {
-        self.name
+    pub fn get_name(&self) -> String {
+        self.name.clone()
     }
 
-    pub fn get_unit_blob_sha(self) -> String {
+    pub fn get_unit_blob_sha(&self) -> String {
         let sha = get_blob_sha_by_path(&self.unit_folder);
         sha.unwrap_or_else(|e| {
             warn!("Failed to get unit blob sha: {e}");
@@ -358,12 +358,33 @@ impl Unit {
         })
     }
 
-    pub fn get_unit_commit_sha(self) -> String {
+    pub fn get_unit_commit_sha(&self) -> String {
         let sha = get_commit_sha_by_path(&self.unit_folder);
         sha.unwrap_or_else(|e| {
             warn!("Failed to get unit commit sha: {e}");
             "undefined".to_string()
         })
+    }
+
+    pub fn get_dims_blob_sha(&self) -> HashMap<String, String> {
+        self.dimensions
+            .iter()
+            .map(|dim| (format!("{}:{}", dim.dim_type, dim.dim_name), dim.data_sha.clone()))
+            .collect::<HashMap<String, String>>()
+    }
+
+    pub fn get_env_vars(&self) -> Option<HashMap<String, String>> {
+        self.manifest.spec.as_ref()
+            .and_then(|spec| spec.env_vars.as_ref())
+            .map(|env_vars| {
+                env_vars.optional
+                    .iter()
+                    .flatten()
+                    .chain(env_vars.required.iter().flatten())
+                    .map(|(_, v)| std::env::var(v).ok().map(|val| (v.clone(), val)))
+                    .flatten()
+                    .collect::<HashMap<String, String>>()
+            })
     }
 }
 
