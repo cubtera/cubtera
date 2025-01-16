@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub fn get_blob_sha_by_path(path: &PathBuf) ->  Result<String, git2::Error> {
+    let abs_path =  path_to_absolute(path);
+
     // Open the repository
-    let repo = git2::Repository::discover(path)?;
+    let repo = git2::Repository::discover(&abs_path)?;
 
     // Get the repository's workdir (root directory)
     let repo_root = repo.workdir().ok_or_else(|| {
@@ -13,7 +15,7 @@ pub fn get_blob_sha_by_path(path: &PathBuf) ->  Result<String, git2::Error> {
     })?;
 
     // Convert the absolute path to a path relative to the repository root
-    let relative_path = path.strip_prefix(repo_root).map_err(|_| {
+    let relative_path = abs_path.strip_prefix(repo_root).map_err(|_| {
         git2::Error::from_str("Failed to get relative path")
     })?;
 
@@ -33,9 +35,19 @@ pub fn get_blob_sha_by_path(path: &PathBuf) ->  Result<String, git2::Error> {
     Ok(entry_sha)
 }
 
+fn path_to_absolute(path: &PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path.clone()
+    } else {
+        std::env::current_dir().unwrap().join(path)
+    }
+}
+
 pub fn get_commit_sha_by_path(path_buf: &PathBuf) -> Result<String, git2::Error> {
+    let abs_path = path_to_absolute(path_buf);
+
     // Open the repository
-    let repo = git2::Repository::discover(path_buf)?;
+    let repo = git2::Repository::discover(abs_path)?;
 
     // Get the HEAD commit
     let head = repo.head()?;
