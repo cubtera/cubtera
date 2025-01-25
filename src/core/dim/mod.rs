@@ -45,87 +45,17 @@ impl Dim {
 
     // Save all not json files from dimension folder to a path (usually temp folder for a unit)
     pub fn save_dim_includes(&self, path: PathBuf) -> Result<(), std::io::Error> {
-        let files = std::fs::read_dir(&self.dim_path)?;
-        let files_chain = std::fs::read_dir(&self.dim_path)?;
-        files
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .filter(|entry| entry.is_file())
-            .filter(|entry| entry.extension().unwrap_or_default() != "json")
-            .filter_map(|file| {
-                file.clone()
-                    .file_stem()
-                    .and_then(std::ffi::OsStr::to_str)
-                    .filter(|file_name| file_name.starts_with(".default:"))
-                    .map(|_| file)
-            })
-            .chain(
-                files_chain
-                    .filter_map(|entry| entry.ok())
-                    .map(|entry| entry.path())
-                    .filter(|entry| entry.is_file())
-                    .filter(|entry| entry.extension().unwrap_or_default() != "json")
-                    .filter_map(|file| {
-                        file.clone()
-                            .file_stem()
-                            .and_then(std::ffi::OsStr::to_str)
-                            .filter(|file_name| {
-                                file_name.starts_with(&format!("{}:", self.dim_name))
-                            })
-                            .map(|_| file)
-                    }),
-            )
-            .try_for_each(|file: std::path::PathBuf| -> std::io::Result<()> {
-                let file_name = file.clone();
-                let file_name = file_name.file_name().unwrap_or_default();
-                let file_name = file_name.to_str().unwrap_or_default().split(':').last();
-                if file_name.is_some() && file_name.unwrap().ne("") {
-                    std::fs::copy(file, path.join(file_name.unwrap()))?;
-                }
-                Ok(())
-            })
+        let entry_filter =
+            |entry: &Path| entry.is_file() && entry.extension().unwrap_or_default() != "json";
+
+        self.process_dim_entries(path, entry_filter)
     }
 
     // Save dimension folders from inventory to a path (usually temp folder for a unit)
     pub fn save_dim_folders(&self, path: PathBuf) -> Result<(), std::io::Error> {
-        let files = std::fs::read_dir(&self.dim_path)?;
-        let files_chain = std::fs::read_dir(&self.dim_path)?;
-        files
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .filter(|entry| entry.is_dir())
-            .filter_map(|dir| {
-                dir.clone()
-                    .file_name()
-                    .and_then(std::ffi::OsStr::to_str)
-                    .filter(|dir_name| dir_name.starts_with(".default:"))
-                    // .filter(|dir_name| dir_name.starts_with("_default:"))
-                    .map(|_| dir)
-            })
-            .chain(
-                files_chain
-                    .filter_map(|entry| entry.ok())
-                    .map(|entry| entry.path())
-                    .filter(|entry| entry.is_dir())
-                    .filter_map(|dir: PathBuf| {
-                        dir.clone()
-                            .file_name()
-                            .and_then(std::ffi::OsStr::to_str)
-                            .filter(|dir_name| dir_name.starts_with(&format!("{}:", self.dim_name)))
-                            .map(|_| dir)
-                    }),
-            )
-            .try_for_each(|dir: std::path::PathBuf| -> std::io::Result<()> {
-                let dir_name = dir.clone();
-                let dir_name = dir_name.file_name().unwrap_or_default();
-                let dir_name = dir_name.to_str().unwrap_or_default().split(':').last();
-                if let Some(dir_name) = dir_name {
-                    if !dir_name.is_empty() {
-                        copy_folder(dir, &path.join(dir_name), true);
-                    }
-                }
-                Ok(())
-            })
+        let entry_filter = |entry: &Path| entry.is_dir();
+
+        self.process_dim_entries(path, entry_filter)
     }
 
     // Save dimension variables values to json file
@@ -138,6 +68,65 @@ impl Dim {
             serde_json::to_string_pretty(&json_content).unwrap(),
         )?;
         Ok(json_vars_file_name)
+    }
+
+    fn get_filtered_entries<F>(
+        &self,
+        prefix: &str,
+        entry_filter: F,
+    ) -> std::io::Result<Vec<PathBuf>>
+    where
+        F: Fn(&Path) -> bool,
+    {
+        Ok(std::fs::read_dir(&self.dim_path)?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(move |entry| entry_filter(entry))
+            .filter_map(move |entry| {
+                entry
+                    .clone()
+                    .file_name()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .filter(|name| name.starts_with(prefix))
+                    .map(|_| entry)
+            })
+            .collect())
+    }
+
+    fn process_dim_entries<F>(&self, path: PathBuf, entry_filter: F) -> Result<(), std::io::Error>
+    where
+        F: Fn(&Path) -> bool,
+    {
+        let default_prefix = format!(".default{}", &GLOBAL_CFG.file_name_separator);
+        let dim_prefix = format!("{}{}", &self.dim_name, &GLOBAL_CFG.file_name_separator);
+
+        let default_entries = self.get_filtered_entries(&default_prefix, &entry_filter)?;
+        let dim_entries = self.get_filtered_entries(&dim_prefix, &entry_filter)?;
+
+        default_entries
+            .into_iter()
+            .chain(dim_entries)
+            .try_for_each(|entry| {
+                let entry_name = entry
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .and_then(|s| s.split(&GLOBAL_CFG.file_name_separator).last())
+                    .filter(|s| !s.is_empty());
+
+                match entry_name {
+                    Some(name) => self.copy_entry(&entry, &path.join(name), entry.is_dir()),
+                    None => Ok(()),
+                }
+            })
+    }
+
+    fn copy_entry(&self, src: &Path, dest: &Path, is_dir: bool) -> std::io::Result<()> {
+        if is_dir {
+            copy_folder(src.to_path_buf(), &dest.to_path_buf(), true);
+            Ok(())
+        } else {
+            std::fs::copy(src, dest).map(|_| ())
+        }
     }
 
     // Generate dimension variables json values from dim values + parent dim values
@@ -218,16 +207,16 @@ impl DimBuilder {
     }
 
     pub fn new_undefined(dim_type: &str) -> Self {
-
         let storage = match &GLOBAL_CFG.db_client {
             Some(_) => Storage::DB,
             None => Storage::FS,
         };
 
-        let dim = Self::new(dim_type, &GLOBAL_CFG.org, &storage)
-            .read_default_data();
+        let dim = Self::new(dim_type, &GLOBAL_CFG.org, &storage).read_default_data();
 
-        let null_data: Value = dim.default_data.clone()
+        let null_data: Value = dim
+            .default_data
+            .clone()
             .as_object_mut()
             .unwrap_or(&mut serde_json::Map::new())
             .keys()
@@ -236,10 +225,6 @@ impl DimBuilder {
             .map(|key| (key, Value::Null))
             .collect();
 
-
-        // let mut null_data = Self::get_null_keys_for_dim(dim_type, datasource);
-        // null_data["meta"] = Value::Null;
-
         Self {
             dim_type: dim_type.into(),
             dim_name: "undefined".to_string(),
@@ -247,27 +232,6 @@ impl DimBuilder {
             ..Default::default()
         }
     }
-
-    // fn get_null_keys_for_dim(dim_type: &str, datasource: Box<dyn DataSource> ) -> Value {
-    //
-    //     let dim_path = Path::new(&GLOBAL_CFG.inventory_path)
-    //         .join(&GLOBAL_CFG.org)
-    //         .join(dim_type);
-    //
-    //     std::fs::read_dir(dim_path)
-    //         .unwrap_or_exit(format!("Unable to read optional dim {} from inventory", dim_type))
-    //         .filter_map(|entry| entry.ok())
-    //         .map(|entry| entry.path())
-    //         .filter(|entry| entry.is_file())
-    //         .filter_map(|entry| {
-    //             entry.file_stem()
-    //                 .unwrap_or_default()
-    //                 .to_string_lossy()
-    //                 .strip_prefix(".default:")
-    //                 .map(|key| (key.to_string(), Value::Null))
-    //         })
-    //         .collect::<Value>()
-    // }
 
     pub fn with_name(mut self, dim_name: &str) -> Self {
         self.dim_name = dim_name.into();
@@ -286,7 +250,10 @@ impl DimBuilder {
 
     pub fn get_all_kids_by_name(&self) -> HashMap<String, Vec<String>> {
         if GLOBAL_CFG.dim_relations.is_empty() {
-            warn!("No dim_relations found in config for {}:{}", &self.dim_type, &self.dim_name);
+            warn!(
+                "No dim_relations found in config for {}:{}",
+                &self.dim_type, &self.dim_name
+            );
             return HashMap::new();
         }
         let child_index = GLOBAL_CFG
@@ -357,7 +324,8 @@ impl DimBuilder {
             None => None,
         };
 
-        let kids: Vec<String> = self.get_all_kids_by_name()
+        let kids: Vec<String> = self
+            .get_all_kids_by_name()
             .into_iter()
             .flat_map(|(k, v)| v.into_iter().map(move |x| format!("{}:{}", k, x)))
             .collect();
@@ -431,7 +399,10 @@ impl DimBuilder {
         builder
             .datasource
             .upsert_all_data(data)
-            .unwrap_or_exit(format!("Error saving dim {} data to DB:", &self.dim_type.red()));
+            .unwrap_or_exit(format!(
+                "Error saving dim {} data to DB:",
+                &self.dim_type.red()
+            ));
         info!(target: "im", "Saved {} dimensions of {} type", count.blue(), &self.dim_type.blue());
     }
 
@@ -519,75 +490,202 @@ impl DimBuilder {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use data::data_src_init;
-//     use data::Storage;
-//
-//     #[test]
-//     fn switch_datasource_changes_storage() {
-//         let initial_storage = Storage::FS;
-//         let new_storage = Storage::DB;
-//         let dim_builder = DimBuilder::default().switch_datasource(&initial_storage);
-//         let updated_dim_builder = dim_builder.switch_datasource(&new_storage);
-//
-//         assert_eq!(format!("{:?}", updated_dim_builder.storage), format!("{:?}", new_storage));
-//     }
-//
-//     #[test]
-//     fn switch_datasource_initializes_new_datasource() {
-//         let initial_storage = Storage::FS;
-//         let new_storage = Storage::DB;
-//         let dim_builder = DimBuilder::default().switch_datasource(&initial_storage);
-//         let updated_dim_builder = dim_builder.switch_datasource(&new_storage);
-//
-//         let expected_datasource = data_src_init(&updated_dim_builder.org, &updated_dim_builder.dim_type, new_storage);
-//         assert_eq!(format!("{:?}", updated_dim_builder.datasource), format!("{:?}", expected_datasource));
-//     }
-//
-//     #[test]
-//     fn switch_datasource_with_same_storage() {
-//         let storage = Storage::FS;
-//         let dim_builder = DimBuilder::default().switch_datasource(&storage);
-//         let updated_dim_builder = dim_builder.switch_datasource(&storage);
-//
-//         assert_eq!(updated_dim_builder.storage, storage);
-//         assert_eq!(updated_dim_builder.datasource, data_src_init(&updated_dim_builder.org, &updated_dim_builder.dim_type, storage));
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tempfile::TempDir;
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//
-//     #[test]
-//     fn split_by_colon_with_valid_input() {
-//         let input = "type:name";
-//         let (dim_type, dim_name) = DimBuilder::split_by_colon(input);
-//         assert_eq!(dim_type, "type");
-//         assert_eq!(dim_name, "name");
-//     }
-//
-//     #[test]
-//     fn split_by_colon_with_missing_colon() {
-//         let input = "typename";
-//         let result = std::panic::catch_unwind(|| DimBuilder::split_by_colon(input));
-//         assert!(result.is_err());
-//     }
-//
-//     #[test]
-//     fn split_by_colon_with_empty_string() {
-//         let input = "";
-//         let result = std::panic::catch_unwind(|| DimBuilder::split_by_colon(input));
-//         assert!(result.is_err());
-//     }
-//
-//     #[test]
-//     fn split_by_colon_with_multiple_colons() {
-//         let input = "type:name:extra";
-//         let (dim_type, dim_name) = DimBuilder::split_by_colon(input);
-//         assert_eq!(dim_type, "type");
-//         assert_eq!(dim_name, "name:extra");
-//     }
-// }
+    // Helper function to create a basic Dim instance for testing
+    fn create_test_dim() -> Dim {
+        Dim {
+            dim_name: "test_dim".to_string(),
+            dim_type: "test_type".to_string(),
+            key_path: PathBuf::from("test/path"),
+            dim_path: PathBuf::from("test/dim/path"),
+            parent: None,
+            data: json!({"test_key": "test_value"}),
+            data_sha: "test_sha".to_string(),
+            kids: Some(vec!["child1".to_string(), "child2".to_string()]),
+        }
+    }
+
+    #[test]
+    fn test_dim_data_access() {
+        let dim = create_test_dim();
+        // Test get_data
+        assert_eq!(dim.get_data()["test_key"], "test_value");
+        // Test get_dim_data
+        assert_eq!(dim.get_dim_data()["test_key"], "test_value");
+    }
+
+    #[test]
+    fn split_by_colon_with_valid_input() {
+        let input = "type:name";
+        let (dim_type, dim_name) = DimBuilder::split_by_colon(input);
+        assert_eq!(dim_type, "type");
+        assert_eq!(dim_name, "name");
+    }
+
+    #[test]
+    fn split_by_colon_with_multiple_colons() {
+        let input = "type:name:extra";
+        let (dim_type, dim_name) = DimBuilder::split_by_colon(input);
+        assert_eq!(dim_type, "type");
+        assert_eq!(dim_name, "name:extra");
+    }
+
+    // TODO: unwind can't handle exit(1) cases. Fix.
+    // #[test]
+    // fn split_by_colon_with_empty_string() {
+    //     let input = "";
+    //     let result = std::panic::catch_unwind(|| DimBuilder::split_by_colon(input));
+    //     //assert!(result.is_err());
+    //     assert_eq!(format!("{:?}", result), "Dim name must be in format <dim_type>:<dim_name>. Got: ");
+    // }
+    // #[test]
+    // fn split_by_colon_with_missing_colon() {
+    //     let input = "typename";
+    //     let result = std::panic::catch_unwind(|| DimBuilder::split_by_colon(input));
+    //     assert!(result.is_err());
+    // }
+
+    #[test]
+    fn test_dim_tree_generation() {
+        let mut child_dim = create_test_dim();
+        let mut parent_dim = Dim {
+            dim_name: "parent_dim".to_string(),
+            dim_type: "parent_type".to_string(),
+            ..create_test_dim()
+        };
+
+        // Create grandparent
+        let grandparent_dim = Dim {
+            dim_name: "grandparent_dim".to_string(),
+            dim_type: "grandparent_type".to_string(),
+            ..create_test_dim()
+        };
+
+        parent_dim.parent = Some(Box::new(grandparent_dim));
+        child_dim.parent = Some(Box::new(parent_dim));
+
+        let tree = child_dim.get_dim_tree();
+        assert_eq!(tree, vec!["test_dim", "parent_dim", "grandparent_dim"]);
+    }
+
+    #[test]
+    fn test_dim_builder_creation() {
+        let builder = DimBuilder::new("test_type", "test_org", &Storage::FS);
+        assert_eq!(builder.dim_type, "test_type");
+        assert_eq!(builder.org, "test_org");
+    }
+
+    #[test]
+    fn test_dim_builder_with_name() {
+        let builder = DimBuilder::new("test_type", "test_org", &Storage::FS).with_name("test_name");
+
+        assert_eq!(builder.dim_name, "test_name");
+        assert_eq!(builder.data["name"], "test_name");
+    }
+
+    #[test]
+    fn test_dim_builder_merge_defaults() {
+        let mut builder = DimBuilder::new("test_type", "test_org", &Storage::FS);
+        builder.default_data = json!({
+            "default_key": "default_value",
+            "shared_key": "default_shared"
+        });
+        builder.data = json!({
+            "data_key": "data_value",
+            "shared_key": "data_shared"
+        });
+
+        let merged = builder.merge_defaults();
+        assert_eq!(merged.data["default_key"], "default_value");
+        assert_eq!(merged.data["data_key"], "data_value");
+        assert_eq!(merged.data["shared_key"], "data_shared");
+    }
+
+    #[test]
+    fn test_get_data_mut() {
+        let mut dim = Dim::default();
+        let data = Value::String("test".to_string());
+        dim.data = data.clone();
+        assert_eq!(dim.get_data_mut(), &data);
+    }
+
+    #[test]
+    fn test_get_data() {
+        let mut dim = Dim::default();
+        let data = Value::String("test".to_string());
+        dim.data = data.clone();
+        assert_eq!(dim.get_data(), &data);
+    }
+
+    #[test]
+    fn test_get_dim_data() {
+        let mut dim = Dim::default();
+        let data = Value::String("test".to_string());
+        dim.data = data.clone();
+        assert_eq!(dim.get_dim_data(), data);
+    }
+
+    #[test]
+    fn test_get_dim_tree() {
+        let mut dim = Dim::default();
+        dim.dim_name = "child".to_string();
+        let mut parent = Dim::default();
+        parent.dim_name = "parent".to_string();
+        dim.parent = Some(Box::new(parent));
+
+        let tree = dim.get_dim_tree();
+        assert_eq!(tree, vec!["child", "parent"]);
+    }
+
+    #[test]
+    fn test_get_filtered_entries() {
+        let mut dim = Dim::default();
+        dim.dim_path = PathBuf::from("test_path");
+        let entry_filter = |entry: &Path| entry.is_file();
+        let result = dim.get_filtered_entries("test_prefix", entry_filter);
+        assert!(result.is_err()); // Should error if test_path doesn't exist
+    }
+
+    #[test]
+    fn test_dim_json_vars() {
+        let mut dim = create_test_dim();
+        dim.data = json!({
+            "var1": "value1",
+            "var2": "value2"
+        });
+
+        let temp_dir = TempDir::new().unwrap();
+        let result = dim.save_json_dim_vars(temp_dir.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    // #[test]
+    // fn test_dim_builder_switch_datasource() {
+    //     let builder = DimBuilder::new("test_type", "test_org", &Storage::FS);
+    //     let switched = builder.switch_datasource(&Storage::DB);
+    //     assert_eq!(
+    //         format!("{:?}", switched.storage),
+    //         format!("{:?}", Storage::DB)
+    //     );
+    // }
+
+    // #[test]
+    // fn test_new_undefined_dim() {
+    //     let dim = DimBuilder::new_undefined("test_type").build();
+    //     assert_eq!(dim.dim_name, "undefined".to_string());
+    //     assert_eq!(dim.dim_type, "test_type".to_string());
+    // }
+
+    #[test]
+    fn test_dim_builder_with_context() {
+        let builder = DimBuilder::new("test_type", "test_org", &Storage::FS)
+            .with_context(Some("test_context".to_string()));
+        assert!(builder.datasource.get_context().is_some());
+        assert_eq!(builder.datasource.get_context().unwrap(), "test_context");
+    }
+}

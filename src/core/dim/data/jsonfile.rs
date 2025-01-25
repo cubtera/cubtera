@@ -25,7 +25,9 @@ impl JsonDataSource {
 
 impl DataSource for JsonDataSource {
     fn get_data_by_name(&self, name: &str) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut filter = format!("{}:", name);
+        let mut filter = format!("{}{}", name, &GLOBAL_CFG.file_name_separator);
+        // this replacement required for be aligned with MongoDB restriction for "." in key names
+        // could be fixed by changing convention for default's file name starting with "_" instead of "."
         if filter.starts_with('_') {
             filter.replace_range(0..1, ".")
         };
@@ -37,16 +39,23 @@ impl DataSource for JsonDataSource {
             .filter(|entry| entry.is_file())
             .filter(|entry| entry.extension().unwrap_or_default() == "json")
             .filter_map(|file| {
+                // remove file extension
                 file.file_stem()
+                    // convert OsStr to str
                     .and_then(std::ffi::OsStr::to_str)
+                    // filter names by filter from above
                     .filter(|file_name| file_name.starts_with(&filter) || *file_name == name)
                     //.filter(|file_name| !file_name.contains("schema"))
+                    // convert into tuple with data type and data
                     .map(|file_name| {
                         (
                             file_name
+                                // if name is equal dim name, return meta
                                 .eq(name)
                                 .then_some("meta")
+                                // or if name is equal ".schema", return "schema"
                                 .or(file_name.eq(".schema").then_some("schema"))
+                                // or return the name without the filter: <name>:manifest.json -> manifest
                                 .unwrap_or(file_name.trim_start_matches(&filter))
                                 .to_string(),
                             read_json_file(&file).unwrap_or_exit(format!(
@@ -61,6 +70,8 @@ impl DataSource for JsonDataSource {
         Ok(json!(data))
     }
 
+    // search for all dim meta files in the dim folder and return the names of the current dim type
+    // and return the data for each dimension name
     fn get_all_data(&self) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
         let data = self
             .get_all_names()
@@ -72,7 +83,10 @@ impl DataSource for JsonDataSource {
         Ok(data)
     }
 
+    // search for all dim meta files in the dim folder and return the names of the current dim type
+    // such as <name>:meta.json or <name>.json
     fn get_all_names(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let meta_suffix = format!("{}meta", &GLOBAL_CFG.file_name_separator);
         let names = std::fs::read_dir(&self.path)
             .unwrap_or_exit(format!("Can't read data folder: {:?}", self.path))
             .filter_map(|entry| entry.ok())
@@ -83,9 +97,9 @@ impl DataSource for JsonDataSource {
                 file.file_stem()
                     .and_then(std::ffi::OsStr::to_str)
                     .filter(|filename| !filename.starts_with('.'))
-                    .filter(|filename| !filename.contains(':') || filename.contains(":meta"))
+                    .filter(|filename| !filename.contains(&GLOBAL_CFG.file_name_separator) || filename.contains(&meta_suffix))
                     .filter(|filename| !filename.contains("schema"))
-                    .map(|filename| filename.trim_end_matches(":meta").to_string())
+                    .map(|filename| filename.trim_end_matches(&meta_suffix).to_string())
             })
             .collect::<Vec<String>>();
 
@@ -111,27 +125,6 @@ impl DataSource for JsonDataSource {
     fn get_context(&self) -> Option<String> {
         self.context.clone()
     }
-
-    // TODO: Remove after usage check
-    // fn get_data_dim_defaults(&self) -> Result<Value, Box<dyn std::error::Error>> {
-    //     let dim_type = self.path.file_name().unwrap().to_str().unwrap();
-    //     let path = self.path
-    //         .join(".config")
-    //         .join(format!("{}:defaults.json", dim_type));
-    //     let data: Value = read_json_file(&path).unwrap_or_default();
-    //
-    //     Ok(data)
-    // }
-
-    // fn upsert_data_dim_defaults(&self, name: &str, data: Value) -> Result<(), Box<dyn std::error::Error>> {
-    //     log::debug!("json data source doesn't support upsert_data_dim_defaults: {}: {}", name, json!(data));
-    //     Ok(())
-    // }
-
-    // fn delete_data_dim_defaults(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    //     log::debug!("json data source doesn't support delete_data_dim_defaults: {}", name);
-    //     Ok(())
-    // }
 }
 
 #[cfg(test)]
@@ -250,23 +243,4 @@ mod tests {
         assert!(result.contains(&dim_type2.to_string()));
         assert!(result.contains(&dim_type3.to_string()));
     }
-
-    // #[test]
-    // fn test_get_data_dim_defaults() {
-    //     let dir = tempdir().unwrap();
-    //     let org = "cubtera";
-    //     let dim_type = "dc";
-    //     let default_content = r#"{ "default_key": "default_value", "region": "us-east-1" }"#;
-    //
-    //     // Create test directory structure and files
-    //     let dim_path = dir.path().join(org).join(dim_type).join(".config");
-    //     fs::create_dir_all(&dim_path).unwrap();
-    //     create_test_file(&dim_path, &format!("{}:defaults.json", dim_type), default_content);
-    //
-    //     let data_source = JsonDataSource::new(org, dim_type, dir.path().to_str().unwrap());
-    //     let result = data_source.get_data_dim_defaults().unwrap();
-    //
-    //     assert_eq!(result["region"], "us-east-1");
-    //     assert_eq!(result["default_key"], "default_value");
-    // }
 }

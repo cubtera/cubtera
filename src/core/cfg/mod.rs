@@ -57,6 +57,8 @@ pub struct CubteraConfig {
     pub state: Option<HashMap<String, HashMap<String, String>>>,
     #[serde(skip)]
     pub db_client: Option<mongodb::sync::Client>,
+    #[serde(default = "default_file_name_separator")]
+    pub file_name_separator: String,
 }
 
 fn default_workspace_path() -> String {
@@ -103,6 +105,9 @@ fn default_orgs() -> Vec<String> {
 fn default_org() -> String {
     "cubtera".into()
 }
+fn default_file_name_separator() -> String {
+    ":".into()
+}
 
 impl Default for CubteraConfig {
     fn default() -> Self {
@@ -126,6 +131,7 @@ impl Default for CubteraConfig {
             runner: None,
             state: None,
             db_client: None,
+            file_name_separator: default_file_name_separator(),
         }
     }
 }
