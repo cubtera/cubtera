@@ -1,7 +1,10 @@
+use std::net::TcpListener;
+use std::ops::Add;
 use crate::utils::helper::*;
 
 use rand::Rng;
 use std::path::{Path, PathBuf};
+use log::{debug, info};
 
 pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let version = match tf_version {
@@ -10,93 +13,119 @@ pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>
     };
 
     let _ = semver::Version::parse(&version).unwrap_or_exit(format!(
-        "Failed to parse tf version {version}. Example: 1.3.5"
+        "Failed to parse tf version {version}. Use semver format.",
     ));
 
     let path = format!("~/.cubtera/tf/{version}").replace('~', &std::env::var("HOME").unwrap());
 
     let tf_folder = Path::new(&path).to_path_buf();
     let tf_path = tf_folder.join("terraform");
-    if tf_path.is_file() && tf_path.metadata().is_ok() {
-        return Ok(tf_path);
-    }
 
+    // take random delay to avoid parallel downloads
     let delay = rand::thread_rng().gen_range(100..800);
     std::thread::sleep(std::time::Duration::from_millis(delay));
 
-    if tf_folder.join("tmp.zip").metadata().is_err() {
-        if !tf_folder.exists() {
-            std::fs::create_dir_all(tf_folder.clone())?;
+    match tf_path.try_exists() {
+        Ok(true) => {
+            if !tf_path.is_file() || !tf_path.metadata().is_ok() {
+                return Err(Box::from(format!("Path {} is not a file or broken", &tf_path.display())))
+            }
+            Ok(tf_path)
         }
-        std::fs::File::create(tf_folder.join("tmp.zip"))
-            .unwrap_or_exit("Unable to create TF zip file".to_string());
-        let os = get_os();
-        let url = format!(
-            "https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{os}.zip",
-        );
+        Ok(false) => {
+            let port = version
+                .replace('.', "")
+                .parse::<u16>()
+                .unwrap_or_default()
+                .add(60022);
 
-        log::debug!(target: "", "Downloading TF zip archive: {}", url);
-
-        // ========================================================================
-        // workaround for async in sync code
-        // let handle = rocket::tokio::runtime::Handle::current();
-        // rocket::tokio::task::block_in_place(move || {
-        //     handle.block_on(async {
-        //         let response = reqwest::get(url)
-        //             .await
-        //             .unwrap_or_exit("Error downloading TF zip file".to_string());
-        //         if !response.status().is_success() {
-        //             std::fs::remove_file(Path::new(&path).join("tmp.zip"))
-        //                 .unwrap_or_exit("Failed to remove TF zip file".to_string());
-        //             exit_with_error(format!("Error downloading TF binary version {}. Status: {}", version, response.status()));
-        //         }
-        //         let body = response
-        //             .bytes()
-        //             .await
-        //             .unwrap_or_exit("Error downloading TF zip file".to_string());
-        //         std::fs::write(Path::new(&path.clone()).join("tmp.zip"), body)
-        //             .unwrap_or_exit("Unable to save TF zip file".to_string());
-        //     });
-        // });
-        // ========================================================================
-        // Sync implementation of zip file download
-        // Async was in use with previous version (keep for a while for ref)
-        let response =
-            reqwest::blocking::get(url).unwrap_or_exit("Error downloading TF zip file".to_string());
-        if !response.status().is_success() {
-            std::fs::remove_file(Path::new(&path).join("tmp.zip"))
-                .unwrap_or_exit("Failed to remove TF zip file".to_string());
-            exit_with_error(format!(
-                "Error downloading TF binary version {}. Status: {}",
-                version,
-                response.status()
-            ));
+            match acquire_lock(port) {
+                Ok(_lock) => {
+                    download_tf(&tf_folder, &version)?;
+                    Ok(tf_path)
+                }
+                Err(_) => {
+                    wait_for_lock(port)?;
+                    if tf_path.exists() {
+                        Ok(tf_path)
+                    } else {
+                        Err(Box::from("TF binary not found after waiting for download in parallel process".to_string()))
+                    }
+                }
+            }
         }
-        let body = response.bytes().unwrap_or_else(|_| {
-            exit_with_error("Error downloading TF zip file".to_string());
-        });
-        std::fs::write(Path::new(&path.clone()).join("tmp.zip"), body).unwrap_or_else(|_| {
-            exit_with_error("Unable to save TF zip file".to_string());
-        });
-        // ========================================================================
+        Err(e) => {
+            Err(Box::from(format!("Something wrong with access to {}: {}", &tf_path.display(), e)))
+        }
+    }
+}
 
-        log::debug!(target: "", "Unzipping TF from {}", tf_folder.join("tmp.zip").display());
-        // Open the downloaded zip file
-        let zip_file = std::fs::File::open(tf_folder.join("tmp.zip"))
-            .unwrap_or_exit("Failed to open TF zip file".to_string());
-        let mut archive = zip::read::ZipArchive::new(zip_file)
-            .unwrap_or_exit("Failed to read TF zip file".to_string());
-        archive.extract(tf_folder.clone())?;
-        std::fs::remove_file(tf_folder.join("tmp.zip"))
-            .unwrap_or_exit("Failed to remove TF zip file".to_string())
+fn acquire_lock(port: u16) -> std::io::Result<TcpListener> {
+    TcpListener::bind(("0.0.0.0", port))
+}
+
+fn wait_for_lock(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let start = std::time::Instant::now();
+    info!(target: "tf switch", "Waiting for terraform download in parallel, port {port} locked");
+    while start.elapsed() < std::time::Duration::from_secs(120) {
+        match TcpListener::bind(("0.0.0.0", port)) {
+            Ok(_) => return Ok(()),
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(1000)),
+        }
+    }
+    Err(Box::from(format!("Timeout waiting for terraform download lock on port {port}")))
+}
+
+fn download_tf(tf_folder: &PathBuf, version: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if !tf_folder.exists() {
+        std::fs::create_dir_all(tf_folder.clone())?;
+    }
+    std::fs::File::create(tf_folder.join("tmp.zip"))?;
+
+    let os = get_os();
+    let url = format!(
+        "https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{os}.zip",
+    );
+
+    debug!(target: "", "Downloading TF zip archive: {}", url);
+
+    let response =
+        reqwest::blocking::get(url).unwrap_or_exit("Error downloading TF zip file".into());
+
+    if !response.status().is_success() {
+
+        std::fs::remove_file(tf_folder.join("tmp.zip"))?;
+
+        exit_with_error(format!(
+            "Error downloading TF binary version {}. Status: {}",
+            version,
+            response.status()
+        ));
     }
 
-    while tf_folder.join("tmp.zip").metadata().is_ok() {
-        log::debug!(target: "", "{}", format!("Locked by parallel TF zip download. If it's not the case, remove {} manually", tf_folder.join("tmp.zip").display()));
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
+    let body = response.bytes().unwrap_or_else(|_| {
+        exit_with_error("Error downloading TF zip file".to_string());
+    });
 
-    Ok(tf_path)
+    std::fs::write(tf_folder.join("tmp.zip"), body).unwrap_or_else(|_| {
+        exit_with_error("Unable to save TF zip file".to_string());
+    });
+
+    debug!(target: "", "Unzipping TF from {}", tf_folder.join("tmp.zip").display());
+
+    // Open the downloaded zip file
+    let zip_file = std::fs::File::open(tf_folder.join("tmp.zip"))
+        .unwrap_or_exit("Failed to open TF zip file".to_string());
+
+    let mut archive = zip::read::ZipArchive::new(zip_file)
+        .unwrap_or_exit("Failed to read TF zip file".to_string());
+
+    archive.extract(tf_folder.clone())?;
+
+    std::fs::remove_file(tf_folder.join("tmp.zip"))
+        .unwrap_or_exit("Failed to remove TF zip file".to_string());
+
+    Ok(())
 }
 
 fn get_latest() -> String {
