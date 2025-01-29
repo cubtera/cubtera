@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.14](https://github.com/cubtera/cubtera/compare/v1.0.13...v1.0.14) (2025-01-29)
+
+
+### Bug Fixes
+
+* **dim:** add configuration for inventory filename separator + refactoring ([01bfb44](https://github.com/cubtera/cubtera/commit/01bfb44272a44a65291f5acd5bed18a6e0667d01))
+* **tf_switch:** refactor lock/wait during tf bin download in parallel runs ([a22e2b3](https://github.com/cubtera/cubtera/commit/a22e2b30d40a110540e2b7705375f6d611d259bf))
+
 ## [1.0.13](https://github.com/cubtera/cubtera/compare/v1.0.12...v1.0.13) (2025-01-16)
 
 
