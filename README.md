@@ -12,32 +12,38 @@ MacOS and Linux:
 brew tap cubtera/cubtera
 brew install cubtera
 ```
-or download binary from [releases](https://ginhub.com/cubtera/cubtera/releases) and put it to your PATH.
+Or download binary from [releases](https://github.com/cubtera/cubtera/releases) and add it to your PATH.
 
-Configure cli with [config file](.github/docs/config.md) or with [environment variables](.github/docs/config.md#environment-variables).
+Configure the CLI using either a [config file](.github/docs/config.md) or [environment variables](.github/docs/config.md#environment-variables).
 
 ## Core Concepts
 
 ### Dimensions
 
-Cubtera uses the concept of "dimensions" to organize and manage infrastructure. Dimensions can represent any logical grouping or layer of your infrastructure. Examples include:
+Cubtera uses "dimensions" to organize and manage infrastructure. Dimensions represent logical groupings or layers of your infrastructure, such as:
 
-- Cloud accounts (e.g., management, production, staging)
-- Environments (e.g., dev, test, staging, production)
-- Data centers (e.g., different regions or types of data centers related to one env)
-- Applications (e.g., different applications or services with the same flows)
-- And more (user-definable: databases, storages, domains, etc.)
+- Cloud accounts (management, production, staging)
+- Environments (dev, test, staging, production)
+- Data centers (regions or types of data centers)
+- Applications (different services with similar deployment flows)
+- Custom dimensions (databases, storage, domains, etc.)
 
-Dimensions could be hierarchical and can have parent-child relationships, as well as flat dimensions with no relationships.
+Dimensions can be either hierarchical (with parent-child relationships) or flat (independent).
 
 ### Participants
 
-Each dimension type can have multiple "participants," which are specific instances or configurations within that dimension. Participants are defined in JSON files and stored in the inventory.
+Each dimension type contains multiple "participants" - specific instances or configurations within that dimension. Participants are defined in JSON files and stored in the inventory.
 
 ### Units
 
-Units are the smallest operational entities in Cubtera, representing specific scripts or actions that can be performed on your infrastructure by different tools like Terraform, Opentofu, Bash Scripts, Helm,  etc. 
-Units are stored in the inventory and can be run with different dimensions values and using cubtera variables defined in the inventory and named following simple convention.
+Units are the atomic operational components in Cubtera. They represent specific infrastructure tasks that can be executed using various tools:
+
+- Terraform/OpenTofu modules
+- Bash scripts
+- Helm charts
+- Other IaC tools
+
+Units are stored in the inventory and can be executed with different dimension values using Cubtera variables.
 
 ### Features
 - [Units management](.github/docs/unit.md): the same IaC code module (tf, otf, bash, etc.) runs with different dimensions values
@@ -49,12 +55,104 @@ Units are stored in the inventory and can be run with different dimensions value
 - docker image for live API service
 - GH action for units runs in CI pipelines (WIP)
 
-## How it works
+- **Units Management**: Run the same IaC code with different dimension values
+- **Inventory Management**: CLI commands for inventory control
+- **Multiple Runners**: Support for terraform, bash, and other execution engines
+- **Inventory API**: MongoDB-backed read-only API server
+- **Deployment Logging**: Track and monitor deployments (BOM)
+- **Flexible Storage**: Support for local files and/or MongoDB
+- **Docker Support**: Container image for API service
+- **CI Integration**: GitHub Actions support (Work in Progress)
+
+## How It Works
 
 Cubtera is a tool for managing IaC units with different dimensions from single inventory. It allows you to separate your infrastructure by different dimensions, and manage it with single inventory without code duplication (DRY).
 
 Each unit is a separate bunch of code for chosen type of runner, such as terraform or bash script, which could be applied with defined set of dimensions. 
 Dedicated dimension is a set of values, which could be used for infrastructure separation by different environments, regions, accounts, etc.
+
+### Basic Example
+
+Let's say you have a VPC network unit that needs to be deployed across different environments. Here's how you'd structure it:
+
+1. Create a dimension called `dc` (data center)
+2. Define environment-specific configurations:
+
+production.json:
+```json
+{
+  "account_id": "123456789012",
+  "cidr_block": "10.0.0.0/16",
+  "availability_zones": ["us-east-1a", "us-east-1b", "us-east-1c"]
+}
+```
+
+staging.json:
+```json
+{
+  "account_id": "9834895838923",
+  "cidr_block": "10.100.0.0/16",
+  "availability_zones": ["us-east-1a", "us-east-1b"]
+}
+```
+
+3. Deploy using the same unit with different dimension values:
+```bash
+cubtera run -d dc:production -u aws_network_vpc -- init
+cubtera run -d dc:production -u aws_network_vpc -- plan
+cubtera run -d dc:production -u aws_network_vpc -- apply
+```
+
+The unit receives these variables automatically:
+- `var.dim_dc_meta`: The full JSON object from the dimension file
+- `var.dim_dc_name`: The dimension name (e.g., "production")
+
+### Unit Structure
+
+A Terraform unit consists of:
+1. A dedicated folder in the `inventory_path`: `units/unit_name`
+2. A `main.tf` file containing the Terraform code
+3. A `manifest.toml` configuration file:
+
+```toml
+dimensions = ["required_dim1", "required_dim2"]
+optDims = ["optional_dim1"]
+allowList = ["allowed_dim1"]
+denyList = ["denied_dim1"]
+type = "tf"
+
+[runner]
+bin_path = "/optional/path/to/binary",
+version = "1.5.0"
+  
+[spec.envVars.required]
+AWS_ACCESS_KEY_ID = "AWS_ACCESS_KEY_ID"
+
+[spec.envVars.optional]
+region = "AWS_REGION"
+
+[spec.files.required]
+[spec.files.optional]
+```
+
+### Dimension Structure
+
+Dimensions are organized as follows:
+
+```
+inventory_path/
+└── dimensions/
+    └── dimension_type/
+        ├── env1.json           # Base configuration
+        ├── env1:manifest.json  # Optional metadata
+        └── env1:defaults.json  # Optional defaults
+```
+
+Variables available in Terraform:
+- `var.dim_<type>_meta`: Content from base JSON
+- `var.dim_<type>_manifest`: Content from manifest JSON
+- `var.dim_<type>_defaults`: Content from defaults JSON
+- `var.dim_<type>_name`: Dimension name as string
 
 For example, you have a unit `aws_network_vpc` which is creating vpc network for your infrastructure, and you want to use it for different environments, like staging and production. You can create dimension, `dc` (data center), and inside this dimension folder create two files `staging.json` and `production.json` with the same set of variables, but with different values. 
 production.json
