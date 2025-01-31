@@ -136,7 +136,6 @@ impl Runner for TfRunner {
 
     fn runner(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut tf_args: Vec<String> = Vec::new();
-        // tf_args.extend(self.tf_vars_args());
 
         if let Some(command) = self.load.command.first() {
             match command.as_str() {
@@ -171,9 +170,7 @@ impl Runner for TfRunner {
         let tf_path = match params.runner_command {
             Some(bin_path) => {
                 info!(target: "tf runner", "Use custom binary path...");
-
                 string_to_path(&bin_path)
-                // Path::new(&bin_path).to_path_buf()
             }
             None => {
                 info!(target: "tf runner", "Run terraform version {}", &params.version.yellow());
@@ -266,7 +263,6 @@ impl Runner for TfRunner {
 
         if !GLOBAL_CFG.clean_cache {
             debug!(target: "tf runner", "Ignore cache cleaning due to global config");
-            //std::process::exit(exit_code);
             self.update_ctx("exit_code", json!(exit_code));
 
             return Ok(());
@@ -288,7 +284,6 @@ impl Runner for TfRunner {
 
         self.update_ctx("exit_code", json!(exit_code));
         Ok(())
-        // std::process::exit(exit_code);
     }
 }
 

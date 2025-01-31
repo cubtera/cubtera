@@ -1,5 +1,5 @@
 use std::net::TcpListener;
-use std::ops::Add;
+use std::ops::{Add, Rem};
 use crate::utils::helper::*;
 
 use rand::Rng;
@@ -33,11 +33,11 @@ pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>
             Ok(tf_path)
         }
         Ok(false) => {
-            let port = version
-                .replace('.', "")
+            let port = version.replace('.', "")
                 .parse::<u16>()
                 .unwrap_or_default()
-                .add(60022);
+                .rem(5430)
+                .add(60000);
 
             match acquire_lock(port) {
                 Ok(_lock) => {
