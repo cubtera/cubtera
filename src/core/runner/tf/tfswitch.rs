@@ -22,7 +22,7 @@ pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>
     let tf_path = tf_folder.join("terraform");
 
     // take random delay to avoid parallel downloads
-    let delay = rand::thread_rng().gen_range(100..800);
+    let delay = rand::rng().random_range(100..800);
     std::thread::sleep(std::time::Duration::from_millis(delay));
 
     match tf_path.try_exists() {

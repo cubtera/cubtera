@@ -196,7 +196,7 @@ impl Runner for TfRunner {
         let mut socket: Option<TcpListener> = None;
         // check if another instance is running with init and wait for it to finish
         if matches!(&self.load.command.as_slice(), [cmd, ..] if cmd == "init") {
-            let delay = rand::thread_rng().gen_range(800..1200);
+            let delay = rand::rng().random_range(800..1200);
 
             loop {
                 match TcpListener::bind(("0.0.0.0", self.load.params.get_lock_port())) {
