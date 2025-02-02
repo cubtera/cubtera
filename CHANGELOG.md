@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.15](https://github.com/cubtera/cubtera/compare/v1.0.14...v1.0.15) (2025-02-02)
+
+
+### Bug Fixes
+
+* **dependabot:** update rand requirement from 0.8 to 0.9 ([#37](https://github.com/cubtera/cubtera/issues/37)) ([98f9707](https://github.com/cubtera/cubtera/commit/98f97078b2050241c4b14647d74b56637658d855))
+* **deps:** rename deprecated methods from rand crate ([b03cfa1](https://github.com/cubtera/cubtera/commit/b03cfa12a746d82bb9c716bb38d7644d189f1f66))
+* **tfswitch:** refactor parallel download lock logic ([3fc4f31](https://github.com/cubtera/cubtera/commit/3fc4f31820d58c3e27444e577fc1b2d155bff4fb))
+* **tfswitch:** remove bug with memory overflow by port number calculations ([0c8e32a](https://github.com/cubtera/cubtera/commit/0c8e32a0646d09d23b4a8ba79be856e225b12d6e))
+
 ## [1.0.14](https://github.com/cubtera/cubtera/compare/v1.0.13...v1.0.14) (2025-01-29)
 
 
