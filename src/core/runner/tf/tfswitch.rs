@@ -1,5 +1,5 @@
 use std::net::TcpListener;
-use std::ops::{Add, Rem};
+use std::ops::{Add, Not, Rem};
 use crate::utils::helper::*;
 
 use rand::Rng;
@@ -25,39 +25,40 @@ pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>
     let delay = rand::rng().random_range(100..800);
     std::thread::sleep(std::time::Duration::from_millis(delay));
 
-    match tf_path.try_exists() {
-        Ok(true) => {
-            if !tf_path.is_file() || !tf_path.metadata().is_ok() {
-                return Err(Box::from(format!("Path {} is not a file or broken", &tf_path.display())))
-            }
-            Ok(tf_path)
-        }
-        Ok(false) => {
-            let port = version.replace('.', "")
-                .parse::<u16>()
-                .unwrap_or_default()
-                .rem(5430)
-                .add(60000);
-
-            match acquire_lock(port) {
-                Ok(_lock) => {
-                    download_tf(&tf_folder, &version)?;
-                    Ok(tf_path)
-                }
-                Err(_) => {
-                    wait_for_lock(port)?;
-                    if tf_path.exists() {
-                        Ok(tf_path)
-                    } else {
-                        Err(Box::from("TF binary not found after waiting for download in parallel process".to_string()))
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            Err(Box::from(format!("Something wrong with access to {}: {}", &tf_path.display(), e)))
+    loop {
+        match is_file_available(&tf_path) {
+            true => return Ok(tf_path),
+            false => rock_n_roll(&version, &tf_folder)?
         }
     }
+}
+
+fn rock_n_roll(version: &str, tf_folder: &PathBuf ) -> Result<(), Box<dyn std::error::Error>> {
+    let port = version.replace('.', "").parse::<u16>()
+        .unwrap_or_default()
+        .rem(5430).add(60000);
+
+    match acquire_lock(port) {
+        Ok(_lock) => download_tf(&tf_folder, &version)?,
+        Err(_) => wait_for_lock(port)?
+    }
+    Ok(())
+}
+
+fn is_file_available(path: &PathBuf) -> bool {
+    // Check if file exists
+    path.exists().not().then(|| return false);
+
+    // Check if file is readable
+    std::fs::metadata(&path).is_ok_and(|m| m.len() == 0).then(|| return false);
+
+    // Check if binary is functional
+    std::process::Command::new(&path)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .and_then(|mut proc| proc.wait())
+        .is_ok()
 }
 
 fn acquire_lock(port: u16) -> std::io::Result<TcpListener> {
