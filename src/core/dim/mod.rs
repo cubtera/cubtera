@@ -263,7 +263,7 @@ impl DimBuilder {
             .map(|x| x + 1)
             .unwrap_or_default();
         if child_index >= GLOBAL_CFG.dim_relations.len() || child_index == 0 {
-            warn!("No child dim found for {}", &self.dim_type);
+            debug!("No child dim found for {}", &self.dim_type);
             return HashMap::new();
         }
         let child_dim_type = &GLOBAL_CFG.dim_relations[child_index];
