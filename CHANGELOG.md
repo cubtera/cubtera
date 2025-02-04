@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.16](https://github.com/cubtera/cubtera/compare/v1.0.15...v1.0.16) (2025-02-04)
+
+
+### Bug Fixes
+
+* **dim:** change log severity lvl ([aff8020](https://github.com/cubtera/cubtera/commit/aff8020cccc76a9453721ee7ade1448f5d1a07a2))
+
 ## [1.0.15](https://github.com/cubtera/cubtera/compare/v1.0.14...v1.0.15) (2025-02-02)
 
 
