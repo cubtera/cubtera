@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.16](https://github.com/cubtera/cubtera/compare/v1.0.15...v1.0.16) (2025-05-24)
+
+
+### Bug Fixes
+
+* **dependabot:** update jsonschema requirement from 0.28 to 0.29 ([#39](https://github.com/cubtera/cubtera/issues/39)) ([6ec911c](https://github.com/cubtera/cubtera/commit/6ec911c98ce9d5d9f02b2e97ec55aa7a9a10e4ee))
+* **dim:** change log severity lvl ([aff8020](https://github.com/cubtera/cubtera/commit/aff8020cccc76a9453721ee7ade1448f5d1a07a2))
+* **lib:** update crates versions ([cd4d1be](https://github.com/cubtera/cubtera/commit/cd4d1bea91fba922bdab86d0339a1c276f7258d7))
+* **lib:** update zip crate to 4.0 ([616dcab](https://github.com/cubtera/cubtera/commit/616dcaba4319f8e7eb48ea8e4af2ade8ef4a4321))
+
 ## [1.0.15](https://github.com/cubtera/cubtera/compare/v1.0.14...v1.0.15) (2025-02-02)
 
 
