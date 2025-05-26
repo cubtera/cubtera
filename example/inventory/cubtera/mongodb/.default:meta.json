@@ -1,10 +1,10 @@
 {
-    "prod": {
-        "size" : "M40",
-        "nodes" : 3
-    },
-    "stg" : {
-        "size" : "M5",
-        "nodes" : 1
-    }
+  "prod": {
+    "size": "M10",
+    "nodes": 3
+  },
+  "stg": {
+    "size": "M5",
+    "nodes": 1
+  }
 }

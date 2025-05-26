@@ -1,3 +1,4 @@
 {
-    "parent": "dome:prod"
+  "parent": "dome:prod",
+  "prod": true
 }

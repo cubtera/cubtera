@@ -1,6 +1,9 @@
 {
-    "owner" : "team2",
-    "prod": {
-        "size" : "M80"
-    }
+  "owner": "team2",
+  "prod": {
+    "size": "M80"
+  },
+  "stg": {
+    "size": "M10"
+  }
 }

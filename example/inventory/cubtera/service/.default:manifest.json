@@ -1,11 +1,13 @@
 {
-    "prod": {
-        "min_capacity": 2,
-        "max_capacity": 10
-    },
+  "cmd": "node run app",
+  "description": "Default service description",
+  "prod": {
+    "min_capacity": 2,
+    "max_capacity": 10
+  },
 
-    "stg": {
-        "min_capacity": 1,
-        "max_capacity": 2
-    }
+  "stg": {
+    "min_capacity": 1,
+    "max_capacity": 2
+  }
 }
