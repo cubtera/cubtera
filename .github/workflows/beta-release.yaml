@@ -216,6 +216,7 @@ jobs:
     if: ${{ needs.check_label.outputs.should_run == 'true' }}
     # if: always()
     steps:
+      - uses: actions/checkout@v4
       - name: Comment PR
         uses: actions/github-script@v7
         with:
@@ -358,6 +359,7 @@ jobs:
           - name: macos-arm64
             asset_name: cubtera-darwin-aarch64
     steps:
+      - uses: actions/checkout@v4
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
