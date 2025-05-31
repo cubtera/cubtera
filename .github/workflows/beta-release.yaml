@@ -1,0 +1,354 @@
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+      - beta-release
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+name: Cubtera beta release
+jobs:
+  build_beta:
+    name: Build beta for ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    outputs:
+      beta_version: ${{ steps.beta-version.outputs.version }}
+    strategy:
+      matrix:
+        name: [
+            linux,
+            macos,
+            macos-arm64
+        ]
+        include:
+          - name: linux
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            asset_name: cubtera-linux-intel
+
+          - name: macos
+            os: macos-13
+            target: x86_64-apple-darwin
+            asset_name: cubtera-darwin-intel
+
+          - name: macos-arm64
+            os: macos-13
+            target: aarch64-apple-darwin
+            asset_name: cubtera-darwin-aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Generate beta version
+        id: beta-version
+        run: |
+          BASE_VERSION=$(grep version Cargo.toml | awk -F '"' '{ print $2 }' | head -1)
+          BETA_VERSION="${BASE_VERSION}-beta.pr${{ github.event.number }}"
+          echo "version=$BETA_VERSION" >> $GITHUB_OUTPUT
+          echo "Beta version: $BETA_VERSION"
+
+      - name: Update Cargo.toml with beta version
+        run: |
+          BETA_VERSION="${{ steps.beta-version.outputs.version }}"
+          
+          echo "Updating Cargo.toml version to: $BETA_VERSION"
+          
+          # Update main package version - use more precise sed to avoid issues
+          sed -i.bak "1,/^version = / s/^version = \".*\"/version = \"$BETA_VERSION\"/" Cargo.toml
+          
+          # Verify the change
+          echo "Updated Cargo.toml version:"
+          grep "^version" Cargo.toml | head -1
+          
+          # Regenerate Cargo.lock with new version
+          cargo update --workspace --offline || cargo update --workspace
+
+      - name: Pre-build install ${{ matrix.name }}
+        if: ${{ matrix.name == 'linux' }}
+        run: |
+          sudo apt update
+          sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
+          sudo update-ca-certificates
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          export PATH=$PATH:$HOME/.cargo/bin
+
+      - name: Generate Cargo.lock and set target toolchain
+        run: |
+          rustup target add ${{ matrix.target }}
+          cargo generate-lockfile
+
+      - name: Rust cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: beta-${{ matrix.name }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build ${{ matrix.name }}
+        run: |
+          cargo build --release --all --target ${{ matrix.target }}
+
+      - name: Archive ${{ matrix.name }}
+        run: |
+          zip -j ${{ matrix.asset_name }}-beta-pr${{ github.event.number }}.zip target/${{ matrix.target }}/release/cubtera target/${{ matrix.target }}/release/cubtera-api
+
+      - name: Upload binaries as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}-beta-pr${{ github.event.number }}
+          path: |
+            ${{ matrix.asset_name }}-beta-pr${{ github.event.number }}.zip
+          retention-days: 7
+          overwrite: true
+
+      - name: Upload linux binaries for docker
+        uses: actions/upload-artifact@v4
+        if: ${{ matrix.name == 'linux' }}
+        with:
+          name: cubtera-beta-binaries
+          path: |
+            target/${{ matrix.target }}/release/cubtera
+            target/${{ matrix.target }}/release/cubtera-api
+          retention-days: 7
+
+  # publish_beta_docker:
+  #   name: Publish beta docker images
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #     packages: write
+  #   needs: [build_beta, upload_beta_assets]
+  #   steps:
+  #     - uses: actions/checkout@v4
+
+  #     - name: Download linux binaries from artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: cubtera-beta-binaries
+
+  #     - name: Generate beta version
+  #       id: beta-version
+  #       run: |
+  #         BASE_VERSION=$(grep version Cargo.toml | awk -F '"' '{ print $2 }' | head -1)
+  #         BETA_VERSION="${BASE_VERSION}-beta.pr${{ github.event.number }}"
+  #         echo "version=$BETA_VERSION" >> $GITHUB_OUTPUT
+  #         echo "Beta version: $BETA_VERSION"
+      
+  #     - name: Log in to the Container registry
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: ${{ env.REGISTRY }}
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
+
+  #     - name: Set CLI Docker tags
+  #       id: meta
+  #       uses: docker/metadata-action@v5
+  #       with:
+  #         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+  #         tags: |
+  #           beta-pr${{ github.event.number }}
+  #           ${{ steps.beta-version.outputs.version }}
+
+  #     - name: Build and push CLI Docker image
+  #       uses: docker/build-push-action@v6
+  #       with:
+  #         context: .
+  #         file: ./Dockerfile.cli
+  #         push: true
+  #         tags: ${{ steps.meta.outputs.tags }}
+  #         labels: ${{ steps.meta.outputs.labels }}
+
+  #     - name: Set API Docker tags
+  #       id: meta-api
+  #       uses: docker/metadata-action@v5
+  #       with:
+  #         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api
+  #         tags: |
+  #           beta-pr${{ github.event.number }}
+  #           ${{ steps.beta-version.outputs.version }}
+
+  #     - name: Build and push API Docker image
+  #       uses: docker/build-push-action@v6
+  #       with:
+  #         context: .
+  #         file: ./Dockerfile.api
+  #         push: true
+  #         tags: ${{ steps.meta-api.outputs.tags }}
+  #         labels: ${{ steps.meta-api.outputs.labels }}
+
+  comment_pr:
+    name: Comment on PR with beta release info
+    runs-on: ubuntu-latest
+    needs: [build_beta, create_beta_release, upload_beta_assets]
+    if: always()
+    steps:
+      - name: Comment PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const betaVersion = '${{ needs.build_beta.outputs.beta_version }}';
+            const prNumber = context.payload.pull_request.number;
+            const commitSha = '${{ github.event.pull_request.head.sha }}'.substring(0, 8);
+            
+            const success = '${{ needs.build_beta.result }}' === 'success' && '${{ needs.create_beta_release.result }}' === 'success' && '${{ needs.upload_beta_assets.result }}' === 'success';
+            
+            let body;
+            if (success) {
+              body = `## 🚀 Beta Release Available
+            
+            **Version:** \`${betaVersion}\` (commit: \`${commitSha}\`)
+            **Last Updated:** ${new Date().toISOString()}
+            
+            ### 📦 Artifacts
+            - **Binary Archives:** Available in [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/v${betaVersion})
+            
+            ### 🧪 Testing
+            \`\`\`bash
+            # Download and test binaries
+            curl -L -o cubtera-linux.zip "https://github.com/${{ github.repository }}/releases/download/v${betaVersion}/cubtera-linux-intel-beta-pr${prNumber}.zip"
+            unzip cubtera-linux.zip
+            ./cubtera --version  # Should show: ${betaVersion}
+            \`\`\`
+            
+            > ⚠️ Beta builds are overwritten on each commit. Artifacts always reflect the latest commit.`;
+            } else {
+              body = `## ❌ Beta Release Failed
+            
+            The beta release build failed for PR #${prNumber} (commit: \`${commitSha}\`). Please check the workflow logs for details.`;
+            }
+            
+            // Find existing beta comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            
+            const existingComment = comments.data.find(comment => 
+              comment.user.login === 'github-actions[bot]' && 
+              comment.body.includes('Beta Release')
+            );
+            
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: body
+              });
+            }
+
+  create_beta_release:
+    name: Create beta release
+    runs-on: ubuntu-latest
+    needs: build_beta
+    if: always()
+    outputs:
+      release_created: ${{ steps.create-release.outputs.release_created }}
+      upload_url: ${{ steps.create-release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Create or update beta release
+        id: create-release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tagName = `v${{ needs.build_beta.outputs.beta_version }}`;
+            const releaseName = `Beta Release PR #${{ github.event.number }}`;
+            const prNumber = ${{ github.event.number }};
+            const commitSha = '${{ github.event.pull_request.head.sha }}';
+            
+            // Check if release already exists
+            let release;
+            try {
+              const { data: existingRelease } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tagName
+              });
+              
+              // Update existing release
+              release = await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: existingRelease.id,
+                name: releaseName,
+                body: `🧪 **Beta Release for PR #${prNumber}**\n\nCommit: ${commitSha}\nUpdated: ${new Date().toISOString()}\n\n⚠️ This is a beta release and may be unstable.`,
+                prerelease: true
+              });
+            } catch (error) {
+              if (error.status === 404) {
+                // Create new release
+                release = await github.rest.repos.createRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag_name: tagName,
+                  name: releaseName,
+                  body: `🧪 **Beta Release for PR #${prNumber}**\n\nCommit: ${commitSha}\nCreated: ${new Date().toISOString()}\n\n⚠️ This is a beta release and may be unstable.`,
+                  prerelease: true,
+                  draft: false
+                });
+              } else {
+                throw error;
+              }
+            }
+            
+            core.setOutput('release_created', 'true');
+            core.setOutput('upload_url', release.data.upload_url);
+            core.setOutput('release_id', release.data.id);
+
+  upload_beta_assets:
+    name: Upload beta assets
+    runs-on: ubuntu-latest
+    needs: [build_beta, create_beta_release]
+    if: ${{ needs.create_beta_release.outputs.release_created == 'true' }}
+    strategy:
+      matrix:
+        name: [linux, macos, macos-arm64]
+        include:
+          - name: linux
+            asset_name: cubtera-linux-intel
+          - name: macos
+            asset_name: cubtera-darwin-intel
+          - name: macos-arm64
+            asset_name: cubtera-darwin-aarch64
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}-beta-pr${{ github.event.number }}
+
+      - name: Upload release assets
+        run: |
+          ZIP_FILE="${{ matrix.asset_name }}-beta-pr${{ github.event.number }}.zip"
+          SHA256_FILE="${ZIP_FILE}.sha256.txt"
+          
+          # Generate checksum
+          SHA256_ZIP=$(shasum -a 256 "$ZIP_FILE" | cut -d ' ' -f 1)
+          echo "$SHA256_ZIP" > "$SHA256_FILE"
+          
+          # Upload to release
+          gh release upload "v${{ needs.build_beta.outputs.beta_version }}" "$ZIP_FILE" "$SHA256_FILE" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
