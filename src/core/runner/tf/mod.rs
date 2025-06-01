@@ -136,6 +136,7 @@ impl Runner for TfRunner {
 
     fn runner(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut tf_args: Vec<String> = Vec::new();
+        let mut run_command = self.load.command.clone();
 
         if let Some(command) = self.load.command.first() {
             match command.as_str() {
@@ -149,6 +150,12 @@ impl Runner for TfRunner {
                     }
                     // extend vars with required env vars from unit manifest
                     tf_args.extend(self.tf_vars_args());
+
+                    if command == "import" {
+                        let import_params: Vec<String> = run_command.iter().skip(1).map(|s| s.to_string()).collect();
+                        tf_args.extend(import_params);
+                        run_command = ["import".to_string()].to_vec();
+                    }
                 }
                 _ => {}
             }
@@ -216,7 +223,7 @@ impl Runner for TfRunner {
 
         let mut child = tf_command
             .current_dir(self.load.unit.temp_folder.to_str().unwrap())
-            .args(&self.load.command)
+            .args(run_command)
             .args(tf_args)
             .envs(self.get_env_tf_vars())
             //.env("TF_DATA_DIR", &self.config.temp_folder_path)
