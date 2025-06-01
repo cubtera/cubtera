@@ -178,7 +178,7 @@ impl CubteraConfig {
     
     /// Create configuration from raw config data
     fn from_config_data(config_data: HashMap<String, Value>) -> ConfigResult<Self> {
-        debug!("Creating CubteraConfig from {} config values", config_data.len());
+        debug!("Creating Cubtera config from {} config values", config_data.len());
         
         // Convert HashMap to JSON Value for deserialization
         let config_value = serde_json::to_value(&config_data)
@@ -194,7 +194,7 @@ impl CubteraConfig {
         // Initialize database connection if configured
         config.initialize_database()?;
         
-        debug!("CubteraConfig created successfully");
+        debug!("Cubtera config created successfully");
         Ok(config)
     }
     

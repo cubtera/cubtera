@@ -43,7 +43,7 @@ impl ConfigLoader {
     
     /// Load environment variables with the configured prefix
     pub fn load_env_vars(&self) -> ConfigResult<HashMap<String, Value>> {
-        debug!("Loading environment variables with prefix: {}", self.env_prefix);
+        debug!("Loading environment variables with prefix: {}", self.env_prefix.yellow());
         
         config::Config::builder()
             .add_source(
@@ -90,7 +90,7 @@ impl ConfigLoader {
     
     /// Load configuration from file (TOML format)
     pub fn load_config_file(&self, path: &str) -> ConfigResult<HashMap<String, HashMap<String, Value>>> {
-        debug!("Loading config file: {}", path);
+        debug!("Loading config file: {}", path.blue());
         
         // Try to load the config file, but don't fail if it doesn't exist
         let config_result = config::Config::builder()
@@ -106,11 +106,11 @@ impl ConfigLoader {
             Err(e) => {
                 // Check if it's a file not found error (which is acceptable)
                 if e.to_string().contains("not found") || e.to_string().contains("No such file") {
-                    warn!("Config file not found: {}. Using default configuration.", path);
+                    warn!(target: "cfg", "Config file not found: {}. Using default configuration.", path.blue());
                     Ok(HashMap::new())
                 } else {
                     // Other errors are more serious
-                    warn!("Failed to read config file {}: {}. Using default configuration.", path, e);
+                    warn!("Failed to read config file {}: {}. Using default configuration.", path.blue(), e);
                     Ok(HashMap::new())
                 }
             }
