@@ -163,13 +163,21 @@ impl ConfigLoader {
     
     /// Validate that required configuration values are present
     pub fn validate_config(&self, config: &HashMap<String, Value>) -> ConfigResult<()> {
-        // Add validation logic here if needed
-        // For now, we'll just check if workspace_path is valid if provided
+        // Basic validation - just check for obviously invalid values
+        // Detailed validation will be done in CubteraConfig::validate()
         
         if let Some(workspace_path) = config.get("workspace_path") {
             if let Some(path_str) = workspace_path.as_str() {
                 if path_str.is_empty() {
                     return Err(ConfigError::validation("workspace_path", "cannot be empty"));
+                }
+            }
+        }
+        
+        if let Some(org) = config.get("org") {
+            if let Some(org_str) = org.as_str() {
+                if org_str.is_empty() {
+                    return Err(ConfigError::validation("org", "cannot be empty"));
                 }
             }
         }

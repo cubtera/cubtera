@@ -7,7 +7,7 @@ pub use config::CubteraConfig;
 pub use error::{ConfigError, ConfigResult, ConfigResultExt};
 pub use loader::ConfigLoader;
 
-use crate::tools::{CubteraCompat, exit_with_error};
+use crate::tools::exit_with_error;
 use once_cell::sync::Lazy;
 
 /// Global configuration instance

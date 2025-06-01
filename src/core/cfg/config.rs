@@ -1,7 +1,6 @@
 use super::error::{ConfigError, ConfigResult, ConfigResultExt};
 use super::loader::ConfigLoader;
 use crate::tools::{convert_path_to_absolute, db};
-use crate::utils::helper::*;
 use log::{debug, warn};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
@@ -158,7 +157,9 @@ impl CubteraConfig {
         
         if config_data.is_empty() {
             debug!("No configuration data found, using defaults");
-            return Ok(Self::default());
+            let config = Self::default();
+            config.validate()?;
+            return Ok(config);
         }
         
         Self::from_config_data(config_data)
@@ -170,7 +171,9 @@ impl CubteraConfig {
         
         if config_data.is_empty() {
             debug!("No configuration data found, using defaults");
-            return Ok(Self::default());
+            let config = Self::default();
+            config.validate()?;
+            return Ok(config);
         }
         
         Self::from_config_data(config_data)
@@ -193,6 +196,9 @@ impl CubteraConfig {
         
         // Initialize database connection if configured
         config.initialize_database()?;
+        
+        // Validate the final configuration
+        config.validate()?;
         
         debug!("Cubtera config created successfully");
         Ok(config)
@@ -278,12 +284,6 @@ impl CubteraConfig {
         Ok(())
     }
     
-    /// Get configuration as JSON Value
-    pub fn get_values(&self) -> ConfigResult<serde_json::Value> {
-        serde_json::to_value(self)
-            .serialization_error("json")
-    }
-    
     /// Get database client if available
     pub fn get_db(&self) -> Option<mongodb::sync::Client> {
         self.db_client.clone()
@@ -300,12 +300,6 @@ impl CubteraConfig {
     pub fn get_json(&self) -> ConfigResult<String> {
         serde_json::to_string_pretty(self)
             .serialization_error("json")
-    }
-    
-    /// Get configuration as TOML
-    pub fn get_toml(&self) -> ConfigResult<String> {
-        toml::to_string_pretty(self)
-            .serialization_error("toml")
     }
     
     /// Validate the configuration
@@ -328,6 +322,20 @@ impl CubteraConfig {
         // Validate file name separator
         if self.file_name_separator.is_empty() {
             return Err(ConfigError::validation("file_name_separator", "cannot be empty"));
+        }
+        
+        // Validate paths exist or can be created (basic check)
+        for (name, path) in [
+            ("workspace_path", &self.workspace_path),
+            ("inventory_path", &self.inventory_path),
+            ("units_path", &self.units_path),
+            ("modules_path", &self.modules_path),
+            ("plugins_path", &self.plugins_path),
+            ("temp_folder_path", &self.temp_folder_path),
+        ] {
+            if path.is_empty() {
+                return Err(ConfigError::validation(name, "cannot be empty"));
+            }
         }
         
         debug!("Configuration validation passed");
