@@ -62,6 +62,7 @@ yansi = "1.0.1"
 handlebars = "6.3.2"
 git2 = "0.20"
 sha2 = "0.10.9"
+thiserror = "2.0"
 
 [dev-dependencies]
 mockall = "0.13"
