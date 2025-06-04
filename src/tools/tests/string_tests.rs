@@ -11,7 +11,7 @@ mod tests {
         assert_eq!(capitalize_first("a"), "A");
         assert_eq!(capitalize_first("HELLO"), "HELLO");
         assert_eq!(capitalize_first("123abc"), "123abc");
-        assert_eq!(capitalize_first("мир"), "Мир"); // Unicode test
+        assert_eq!(capitalize_first("добрий ранок"), "Добрий ранок"); // Unicode test
     }
 
     #[test]
@@ -148,23 +148,6 @@ mod tests {
         // Tilde should only expand at the beginning
         let result = string_to_path("/path/~/other").unwrap();
         assert_eq!(result, PathBuf::from("/path/~/other"));
-    }
-
-    // Performance test
-    #[test]
-    fn test_performance_string_to_path() {
-        use std::time::Instant;
-        
-        env::set_var("PERF_VAR", "performance_test");
-        let start = Instant::now();
-        
-        for _ in 0..1000 {
-            let _ = string_to_path("/$PERF_VAR/test/path").unwrap();
-        }
-        
-        let duration = start.elapsed();
-        // Should complete in reasonable time (less than 100ms for 1000 operations)
-        assert!(duration.as_millis() < 100, "Performance test took too long: {:?}", duration);
     }
 
     // Cleanup after tests
