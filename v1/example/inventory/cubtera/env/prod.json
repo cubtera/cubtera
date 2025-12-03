@@ -1,0 +1,4 @@
+{
+  "parent": "dome:prod",
+  "prod": true
+}

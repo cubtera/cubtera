@@ -1,382 +1,351 @@
-# Cubtera - AI Agent Context Guide
+# Cubtera V2 - AI Agent Context Guide
 
 ## Project Overview
 
 **Cubtera** is a Multi-dimensional Infrastructure Manager - a CLI and API tool for managing Infrastructure as Code (IaC) across multiple dimensions (environments, regions, data centers, etc.). It enables running Terraform, OpenTofu, or Bash scripts with context-aware configuration.
 
-### Key Value Proposition
+### Key Features
 
 - Run the same IaC code across different "dimensions" without duplication
 - Hierarchical dimension relationships (e.g., `dome` → `env` → `dc`)
 - Automatic state path generation based on dimensions
 - Deployment logging with full audit trail
 - REST API for programmatic access to inventory data
+- Multiple persistence backends (FileSystem, MongoDB, PostgreSQL)
 
-## Architecture
+---
+
+## Architecture (Hexagonal / Ports & Adapters)
+
+### Project Structure
 
 ```
 cubtera/
-├── src/
-│   ├── lib.rs              # Library entry point, exports prelude
-│   ├── core/               # Core business logic
-│   │   ├── cfg/            # Configuration (GLOBAL_CFG)
-│   │   ├── dim/            # Dimension management
-│   │   │   └── data/       # DataSource trait (FS/MongoDB)
-│   │   ├── dlog/           # Deployment logging
-│   │   ├── im/             # Inventory Management API
-│   │   ├── runner/         # Execution engines (TF, Bash, Tofu)
-│   │   └── unit/           # Unit & Manifest handling
-│   ├── utils/              # Helper functions
-│   └── bin/
-│       ├── cli/            # CLI binary (cubtera)
-│       └── api/            # API binary (cubtera-api)
-├── tests/                  # Integration tests
-│   ├── cli_tests.rs        # CLI command tests
-│   └── api_tests.rs        # API endpoint tests
-└── example/                # Test fixtures & example configs
+├── Cargo.toml                 # Workspace root
+│
+├── crates/
+│   │
+│   │ ─────────── DOMAIN LAYER ───────────
+│   ├── cubtera-domain/        # Pure business logic (zero dependencies)
+│   │   └── src/
+│   │       ├── dimension.rs   # Entity: Dimension, DimType, Hierarchy
+│   │       ├── unit.rs        # Entity: Unit, StatePath
+│   │       ├── manifest.rs    # Value Object: Manifest, Spec
+│   │       ├── runner.rs      # Value Object: RunnerType, RunResult
+│   │       └── error.rs       # Domain errors
+│   │
+│   │ ─────────── APPLICATION LAYER ───────────
+│   ├── cubtera-core/          # Application Services + Ports
+│   │   └── src/
+│   │       ├── ports/         # Traits (interfaces)
+│   │       │   ├── repository.rs
+│   │       │   ├── runner.rs
+│   │       │   └── deployment_log.rs
+│   │       ├── services/      # Use cases
+│   │       │   ├── dimension.rs
+│   │       │   ├── unit.rs
+│   │       │   └── runner.rs
+│   │       └── app.rs         # Composition root
+│   │
+│   │ ─────────── INFRASTRUCTURE LAYER ───────────
+│   ├── cubtera-persistence/   # Repository implementations
+│   │   └── src/
+│   │       ├── fs/            # FileSystem adapter
+│   │       ├── mongodb/       # MongoDB adapter
+│   │       ├── postgres/      # PostgreSQL adapter
+│   │       └── factory.rs     # Repository factory
+│   │
+│   ├── cubtera-runners/       # Runner implementations
+│   │   └── src/
+│   │       ├── terraform.rs
+│   │       ├── opentofu.rs
+│   │       ├── bash.rs
+│   │       └── factory.rs
+│   │
+│   ├── cubtera-config/        # Configuration loading
+│   │
+│   │ ─────────── INTERFACE LAYER ───────────
+│   ├── cubtera/               # CLI (binary: cubtera)
+│   ├── cubtera-api/           # REST API server
+│   ├── cubtera-mcp/           # MCP Server (future)
+│   └── cubtera-web/           # Web UI (future)
+│
+├── v1/                        # Legacy code (reference only)
+└── example/                   # Test fixtures
 ```
+
+### Dependency Graph
+
+```
+                    ┌─────────────────────────────────────────────┐
+                    │           INTERFACE LAYER                    │
+                    │  ┌─────────┐ ┌─────────┐ ┌─────┐ ┌─────┐   │
+                    │  │ cubtera │ │  api    │ │ mcp │ │ web │   │
+                    │  │  (CLI)  │ │ server  │ │     │ │     │   │
+                    │  └────┬────┘ └────┬────┘ └──┬──┘ └──┬──┘   │
+                    └───────┼──────────┼─────────┼───────┼───────┘
+                            │          │         │       │
+                            ▼          ▼         ▼       ▼
+                    ┌─────────────────────────────────────────────┐
+                    │         APPLICATION LAYER                    │
+                    │              cubtera-core                    │
+                    │   ┌─────────────────────────────────────┐   │
+                    │   │  Services    │    Ports (traits)    │   │
+                    │   │  - Dimension │    - Repository      │   │
+                    │   │  - Unit      │    - Runner          │   │
+                    │   │  - Runner    │    - DeploymentLog   │   │
+                    │   └──────────────┴──────────────────────┘   │
+                    └──────────────────┬──────────────────────────┘
+                                       │
+                            ▼          ▼          ▼
+                    ┌─────────────────────────────────────────────┐
+                    │         INFRASTRUCTURE LAYER                 │
+                    │  ┌────────────┐ ┌───────────┐ ┌──────────┐  │
+                    │  │persistence │ │  runners  │ │  config  │  │
+                    │  │ - fs       │ │ - tf      │ │          │  │
+                    │  │ - mongodb  │ │ - tofu    │ │          │  │
+                    │  │ - postgres │ │ - bash    │ │          │  │
+                    │  └────────────┘ └───────────┘ └──────────┘  │
+                    └─────────────────────────────────────────────┘
+                                       │
+                                       ▼
+                    ┌─────────────────────────────────────────────┐
+                    │            DOMAIN LAYER                      │
+                    │            cubtera-domain                    │
+                    │   Dimension, Unit, Manifest, Error          │
+                    │   (zero external dependencies)              │
+                    └─────────────────────────────────────────────┘
+```
+
+---
+
+## Architecture Principles
+
+### 1. Dependency Rule
+
+Dependencies point inward only:
+- **Domain** has ZERO external dependencies (only std)
+- **Core** depends on Domain
+- **Infrastructure** depends on Core + Domain
+- **Interface** depends on all layers
+
+```rust
+// CORRECT: Infrastructure implements Core trait
+impl DimensionRepository for FsDimensionRepository { ... }
+
+// WRONG: Domain importing infrastructure
+use mongodb::Client;  // Never in domain!
+```
+
+### 2. Ports and Adapters
+
+All external systems are accessed through traits (ports):
+
+```rust
+// Port (in cubtera-core/src/ports/repository.rs)
+pub trait DimensionRepository: Send + Sync {
+    async fn find_by_name(&self, dim_type: &str, name: &str) -> Result<Option<Dimension>>;
+    async fn find_all(&self, dim_type: &str) -> Result<Vec<Dimension>>;
+    async fn save(&self, dim: &Dimension) -> Result<()>;
+}
+
+// Adapter (in cubtera-persistence/src/fs/dimension.rs)
+pub struct FsDimensionRepository { /* ... */ }
+impl DimensionRepository for FsDimensionRepository { /* ... */ }
+
+// Adapter (in cubtera-persistence/src/mongodb/dimension.rs)  
+pub struct MongoDimensionRepository { /* ... */ }
+impl DimensionRepository for MongoDimensionRepository { /* ... */ }
+```
+
+### 3. Result-Based Error Handling
+
+No `exit()` calls. All errors returned as `Result<T, Error>`:
+
+```rust
+// CORRECT
+pub fn load_manifest(path: &Path) -> Result<Manifest, ManifestError> {
+    let content = fs::read_to_string(path)?;
+    let manifest: Manifest = toml::from_str(&content)?;
+    Ok(manifest)
+}
+
+// WRONG
+pub fn load_manifest(path: &Path) -> Manifest {
+    let content = fs::read_to_string(path).unwrap_or_exit("Failed to read");
+    // ...
+}
+```
+
+### 4. Explicit Dependencies (No Global State)
+
+All dependencies passed explicitly via constructors:
+
+```rust
+// CORRECT
+pub struct DimensionService {
+    repository: Arc<dyn DimensionRepository>,
+    config: Arc<Config>,
+}
+
+impl DimensionService {
+    pub fn new(repository: Arc<dyn DimensionRepository>, config: Arc<Config>) -> Self {
+        Self { repository, config }
+    }
+}
+
+// WRONG
+pub fn get_dimension(name: &str) -> Dimension {
+    let path = GLOBAL_CFG.inventory_path;  // No global state!
+    // ...
+}
+```
+
+### 5. Composition Root
+
+All wiring happens in one place (App struct):
+
+```rust
+// cubtera-core/src/app.rs
+pub struct App {
+    pub dimension_service: DimensionService,
+    pub unit_service: UnitService,
+    pub runner_service: RunnerService,
+}
+
+impl App {
+    pub fn new(config: Config) -> Result<Self> {
+        // Create repositories based on config
+        let dim_repo: Arc<dyn DimensionRepository> = match config.storage {
+            StorageType::Fs => Arc::new(FsDimensionRepository::new(&config)),
+            StorageType::MongoDB(ref conn) => Arc::new(MongoDimensionRepository::new(conn)?),
+            StorageType::Postgres(ref conn) => Arc::new(PostgresDimensionRepository::new(conn)?),
+        };
+        
+        // Create services
+        let dimension_service = DimensionService::new(dim_repo.clone(), config.clone());
+        // ...
+        
+        Ok(Self { dimension_service, /* ... */ })
+    }
+}
+```
+
+### 6. Test-First Development
+
+Every module must have tests. Domain logic is easily testable:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn dimension_hierarchy_resolves_correctly() {
+        let parent = Dimension::new("dome", "prod");
+        let child = Dimension::new("env", "prod").with_parent(parent);
+        
+        assert_eq!(child.state_path(), "dome:prod/env:prod");
+    }
+}
+```
+
+---
 
 ## Core Concepts
 
-### 1. Dimensions (`core/dim/`)
+### Dimension
 
-A **Dimension** is a logical grouping for infrastructure organization.
+A logical grouping for infrastructure organization:
 
 ```
-dome:prod          # Top-level dimension (e.g., production dome)
+dome:prod          # Top-level
   └── env:prod     # Environment within dome
       └── dc:us-east-1  # Data center within env
 ```
 
-**Key Files:**
-- `dim/mod.rs` - `Dim` struct and `DimBuilder` for loading dimension data
-- `dim/data/mod.rs` - `DataSource` trait, `Storage` enum (FS/DB)
-- `dim/data/jsonfile.rs` - Filesystem JSON data source
-- `dim/data/mongodb.rs` - MongoDB data source
+### Unit
 
-**Dimension Data Structure:**
-```json
-{
-  "name": "prod",
-  "parent": "dome:prod",
-  "meta": { "affinity_tags": ["production"] },
-  "vpc_cidr": "10.0.0.0/16"
-}
-```
+An atomic infrastructure operation defined by a manifest (`manifest.toml`):
 
-### 2. Units (`core/unit/`)
-
-A **Unit** is an atomic infrastructure operation defined by a manifest.
-
-**Manifest Structure (`manifest.toml`):**
 ```toml
-dimensions = ["dome", "env", "dc"]  # Required dimensions
-type = "tf"                          # Runner type: tf, bash, tofu
-overwrite = true                     # Merge with generic unit
-allowList = ["prod", "staging"]      # Allowed dimension values
-denyList = ["dev"]                   # Denied dimension values
-optDims = ["region"]                 # Optional dimensions
+dimensions = ["dome", "env", "dc"]
+type = "tf"
 
 [runner]
-state_backend = "s3"
 version = "1.5.0"
-
-[state]
-bucket = "{{ org }}-tfstate"
-key = "{{ dim_tree }}/{{ unit_name }}.tfstate"
+state_backend = "s3"
 ```
 
-**Key Files:**
-- `unit/mod.rs` - `Unit` struct, file copying, dimension handling
-- `unit/manifest.rs` - `Manifest` parsing from TOML
+### Runner
 
-### 3. Runners (`core/runner/`)
+Executes infrastructure code. Types: `terraform`, `opentofu`, `bash`
 
-Runners execute infrastructure code.
+---
 
-**Types:**
-- `TF` - Terraform runner (with tfswitch version management)
-- `TOFU` - OpenTofu runner (wraps TF runner)
-- `BASH` - Bash script runner
-
-**Lifecycle:**
-```
-copy_files → change_files → inlet → runner → outlet → logger
-```
-
-**Key Files:**
-- `runner/mod.rs` - `Runner` trait, `RunnerBuilder`, `RunnerType`
-- `runner/params.rs` - `RunnerParams` for version, state backend, etc.
-- `runner/tf/mod.rs` - Terraform-specific implementation
-- `runner/tf/tfswitch.rs` - Terraform version management
-- `runner/bash/mod.rs` - Bash runner
-- `runner/tofu/mod.rs` - OpenTofu runner
-
-### 4. Configuration (`core/cfg/`)
-
-Configuration is loaded from:
-1. Default values (hardcoded)
-2. Config file (`~/.cubtera/config.toml`)
-3. Environment variables (`CUBTERA_*`)
-
-**Important Environment Variables:**
-```bash
-CUBTERA_ORG          # Organization name (required)
-CUBTERA_CONFIG       # Config file path
-CUBTERA_WORKSPACE_PATH
-CUBTERA_DB           # MongoDB connection string
-CUBTERA_DLOG_DB      # Deployment log DB connection
-CUBTERA_LOG          # Log level (error, warn, info, debug)
-```
-
-**Global Config Access:**
-```rust
-use crate::globals::GLOBAL_CFG;
-
-let org = &GLOBAL_CFG.org;
-let db_client = GLOBAL_CFG.db_client.clone();
-```
-
-### 5. Inventory Management (`core/im/`)
-
-API functions for querying dimensions:
-
-```rust
-get_dim_by_name(dim_type, dim_name, org, storage, context)
-get_dim_names_by_type(dim_type, org, storage)
-get_dims_data_by_type(dim_type, org, storage)
-get_dim_defaults_by_type(dim_type, org, storage)
-get_dim_kids(dim_type, dim_name, org, storage)
-get_dim_parent(dim_type, dim_name, org, storage)
-get_all_orgs(storage)
-get_dlog(org, filter, limit)
-```
-
-### 6. Deployment Logging (`core/dlog/`)
-
-Tracks every deployment with:
-- Unit name and dimensions
-- Git SHAs (unit, inventory, dims)
-- Terraform command and exit code
-- Timestamp and job info
-- Optional extended log data
-
-## CLI Interface
+## CLI Commands
 
 ```bash
 # Configuration
-cubtera config                    # Show current config
+cubtera config
 
 # Inventory Management
-cubtera im getAll <dim_type>      # List dimension names
-cubtera im getByName <type> <name># Get dimension data
-cubtera im getDefaults <type>     # Get defaults for type
-cubtera im getByParent <type> <name>  # Get children
-cubtera im getParent <type> <name>    # Get parent
-cubtera im getOrgs                # List organizations
-cubtera im validate <type> <name> # Validate dimension
+cubtera im get-all <dim_type>
+cubtera im get <dim_type> <name>
+cubtera im get-defaults <dim_type>
 
 # Run Units
-cubtera run -u <unit_name> -d <dim:value> [-d <dim:value>...] [-- <command>]
-cubtera tf -u network -d dome:prod -d env:prod -d dc:us-east-1 -- plan
+cubtera run -u <unit> -d <dim:value> [-d <dim:value>...] [-- <command>]
 
 # Deployment Logs
-cubtera log get -q <key:value> [-l <limit>]
+cubtera log get -q <key:value>
 ```
 
-## API Interface
+## API Endpoints
 
 ```
-GET  /health                        # Health check
-GET  /v1/orgs                       # List organizations
-GET  /v1/{org}/dimTypes             # List dimension types
-GET  /v1/{org}/dims?type=           # List dims by type
-GET  /v1/{org}/dim?type=&name=      # Get dimension by name
-GET  /v1/{org}/dimDefaults?type=    # Get defaults
-GET  /v1/{org}/dimParent?type=&name=    # Get parent
-GET  /v1/{org}/dimsByParent?type=&name= # Get children
-GET  /v1/{org}/dimsData?type=       # Get all data by type
+GET  /health
+GET  /v1/orgs
+GET  /v1/{org}/dimensions/{type}
+GET  /v1/{org}/dimensions/{type}/{name}
+GET  /v1/{org}/dimensions/{type}/defaults
 ```
 
-**Response Format:**
-```json
-{
-  "status": "ok",
-  "id": "dimByName",
-  "type": "env",
-  "name": "prod",
-  "data": { ... }
-}
-```
+---
 
-## Data Storage
+## Development Commands
 
-### Filesystem (Storage::FS)
-
-```
-inventory/
-└── {org}/
-    ├── {dim_type}/
-    │   ├── {dim_name}.json
-    │   └── .defaults:{name}.json
-    └── ...
-```
-
-### MongoDB (Storage::DB)
-
-- Database per organization
-- Collection per dimension type
-- Documents with `name`, optional `context` field
-
-## Key Patterns
-
-### Error Handling
-
-```rust
-use crate::utils::helper::*;
-
-// Exit on error
-value.unwrap_or_exit("Error message".to_string());
-
-// Log warning and continue
-result.check_with_warn("Warning message");
-```
-
-### Handlebars Templating
-
-State backend configs support templating:
-```toml
-[state.s3]
-bucket = "{{ org }}-tfstate"
-key = "{{ dim_tree }}/{{ unit_name }}.tfstate"
-region = "us-east-1"
-```
-
-Available variables: `org`, `unit_name`, `dim_tree`
-
-### Dimension Relations
-
-Configured via `dim_relations` (colon-separated):
-```toml
-dim_relations = "dome:env:dc"
-```
-
-This defines the hierarchy: `dome` → `env` → `dc`
-
-## Testing
-
-### Run All Tests
 ```bash
-cargo test
+# Build all
+cargo build
+
+# Run CLI
+cargo run -p cubtera -- im get-all env
+
+# Run API server
+cargo run -p cubtera-api
+
+# Test specific crate
+cargo test -p cubtera-domain
+
+# Test all
+cargo test --workspace
+
+# Check formatting
+cargo fmt --check
+
+# Lint
+cargo clippy --workspace
 ```
 
-### Test Coverage Summary
-
-| Module | Tests | Focus |
-|--------|-------|-------|
-| `core::cfg` | 20 | Config defaults, paths, serialization |
-| `core::unit::manifest` | 24 | TOML parsing, validation |
-| `core::unit` | 17 | Unit state path, dimensions |
-| `core::runner` | 12 | Runner types, templating |
-| `core::runner::params` | 14 | Params initialization |
-| `core::dlog` | 14 | Log serialization |
-| `core::im` | 22 | Dot notation, filters |
-| `core::dim` | 14 | Dimension building |
-| `core::dim::data` | 31 | Storage, DataSource |
-| CLI integration | 31 | All CLI commands |
-| API integration | 22 | Endpoints, formats |
-
-### Test Fixtures
-
-The `example/` directory contains test fixtures:
-- `config.toml` - Example configuration
-- `inventory/cubtera/` - Sample dimensions
-- `units/` - Sample unit manifests
-
-## Development Guidelines
-
-### Adding a New Runner
-
-1. Create `runner/{type}/mod.rs`
-2. Implement `Runner` trait
-3. Add to `RunnerType` enum in `runner/mod.rs`
-4. Update `runner_create()` function
-
-### Adding a New Dimension Operation
-
-1. Add function in `core/im/mod.rs`
-2. Add CLI subcommand in `bin/cli/cmd/im_command.rs`
-3. Add API endpoint in `bin/api/api.rs`
-4. Add tests
-
-### Configuration Changes
-
-1. Add field to `CubteraConfig` in `core/cfg/mod.rs`
-2. Add default function if needed
-3. Update `Default` implementation
-4. Add tests
-
-## Dependencies
-
-Key crates:
-- `clap` - CLI argument parsing
-- `config` - Configuration loading
-- `rocket` - HTTP API framework
-- `mongodb` - MongoDB driver
-- `serde` / `serde_json` / `toml` - Serialization
-- `handlebars` - Templating
-- `git2` - Git operations for SHA retrieval
-- `walkdir` - Directory traversal
-
-Dev dependencies:
-- `assert_cmd` - CLI testing
-- `predicates` - Assertion helpers
-- `tempfile` - Temporary directories for tests
-- `mockall` - Mocking (available but not heavily used)
-
-## Common Tasks
-
-### Get dimension data programmatically
-```rust
-use cubtera::prelude::*;
-
-let dim = DimBuilder::new("env", "cubtera", &Storage::FS)
-    .with_name("prod")
-    .full_build();
-
-let data = dim.get_dim_data();
-```
-
-### Create a unit and run it
-```rust
-let unit = Unit::new(
-    "network".to_string(),
-    &["dome:prod", "env:prod", "dc:us-east-1"],
-    &[],
-    &Storage::FS,
-    None
-).build();
-
-let runner = RunnerBuilder::new(unit, vec!["plan".to_string()]).build();
-runner.run()?;
-```
-
-### Query deployment logs
-```rust
-let logs = get_dlog_by_keys(
-    "cubtera",
-    vec!["env:prod".to_string(), "dc:us-east-1".to_string()],
-    Some(10)
-);
-```
+---
 
 ## Notes for AI Agents
 
-1. **Always check GLOBAL_CFG** - Many operations depend on global config
-2. **Storage type matters** - FS vs DB affects data source behavior
-3. **Dimension hierarchy** - Parent relationships are crucial
-4. **Exit vs Error** - Code often uses `exit_with_error()` for fatal errors
-5. **Test fixtures** - Use `example/` directory for testing
-6. **MongoDB optional** - Most features work with FS storage
-7. **Context parameter** - Used for branching/PR-specific dimension data
-
+1. **Follow the dependency rule** - Domain has no external deps
+2. **Use traits for boundaries** - All external systems via ports
+3. **No global state** - Pass dependencies explicitly
+4. **Result everywhere** - No exit(), only Result<T, E>
+5. **v1/ is reference only** - Don't modify, just look at for behavior
+6. **Tests are mandatory** - Every PR needs tests
+7. **English only in code** - Comments, docs, variable names

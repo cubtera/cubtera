@@ -1,0 +1,10 @@
+[package]
+name = "cubtera-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cubtera domain layer - pure business logic with zero dependencies"
+
+[dependencies]
+# Zero external dependencies - only std
+

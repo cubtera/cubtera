@@ -1,0 +1,29 @@
+dimensions = ["dc"]
+allow_list = ["stg1"]
+opt_dims = ["service"]
+type = "bash"
+
+[runner]
+
+inlet_command = "ls"
+outlet_command = "sleep 10"
+
+runner_command = "./test.sh"
+extra_args = "extra_args"
+
+version = "1.0.0" # not relevant for bash unit
+
+[spec.env_vars.optional]
+my_pwd = "PWD"
+
+[spec.env_vars.required]
+my_home = "HOME"
+
+[spec.files.optional]
+"$PWD/example/remote_folder/test.txt" = "test_optional.txt"
+"~/.viminfo" = "optional.txt"
+"~/.zshrc" = ".zshrc"
+
+[spec.files.required]
+"~/.zshrc" = "required.txt"
+"./example/remote_folder/test.txt" = "remote_required.txt"

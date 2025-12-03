@@ -1,0 +1,24 @@
+[package]
+name = "cubtera"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cubtera CLI - Multi-dimensional Infrastructure Manager"
+
+[[bin]]
+name = "cubtera"
+path = "src/main.rs"
+
+[dependencies]
+cubtera-domain.workspace = true
+cubtera-core.workspace = true
+cubtera-config.workspace = true
+cubtera-persistence.workspace = true
+cubtera-runners.workspace = true
+
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+
