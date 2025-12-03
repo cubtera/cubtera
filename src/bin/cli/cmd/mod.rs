@@ -72,7 +72,13 @@ pub fn get_args() -> CliResult<Cli> {
             storage,
         },
         Some(("config", _)) => {
-            println!("{}", &GLOBAL_CFG.get_json());
+            match GLOBAL_CFG.get_json() {
+                Ok(json) => println!("{}", json),
+                Err(e) => {
+                    eprintln!("Error getting config as JSON: {}", e);
+                    std::process::exit(1);
+                }
+            }
             std::process::exit(0);
         }
         _ => unreachable!(),

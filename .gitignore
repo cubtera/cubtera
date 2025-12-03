@@ -30,6 +30,9 @@ example/.tmp
 .zedstate
 .zed
 
+# Cursor editor
+.cursor
+
 # MacOS
 ### General
 .DS_Store
