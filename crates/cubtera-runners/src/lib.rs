@@ -4,11 +4,15 @@
 
 mod bash;
 mod factory;
-mod terraform;
 mod opentofu;
+mod terraform;
+mod tfswitch;
 
 pub use bash::BashRunner;
 pub use factory::DefaultRunnerFactory;
-pub use terraform::TerraformRunner;
 pub use opentofu::OpenTofuRunner;
+pub use terraform::TerraformRunner;
+
+// Re-export tfswitch for direct usage
+pub use tfswitch::tf_switch;
 

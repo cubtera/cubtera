@@ -38,6 +38,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 mongodb = "3.1"
 # sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }  # Future
 
+# Runners
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+zip = "2.0"
+rand = "0.8"
+semver = "1.0"
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 

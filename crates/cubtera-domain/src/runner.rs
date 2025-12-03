@@ -2,33 +2,50 @@
 //!
 //! Types for representing runner execution parameters and results.
 
+use std::path::PathBuf;
+
 /// Parameters for runner execution
 #[derive(Debug, Clone)]
 pub struct RunParams {
     /// Working directory
-    pub work_dir: String,
-    /// Command to execute (e.g., "plan", "apply")
+    pub work_dir: PathBuf,
+    /// Command to execute (e.g., ["plan"], ["apply"])
     pub command: Vec<String>,
     /// Environment variables
     pub env_vars: Vec<(String, String)>,
     /// Auto-approve flag
     pub auto_approve: bool,
+    /// Runner version (e.g., "1.6.6", "latest")
+    pub version: Option<String>,
+    /// Custom runner binary path (if set, version is ignored)
+    pub runner_command: Option<String>,
+    /// Extra arguments to pass to runner
+    pub extra_args: Option<String>,
+    /// State backend type (e.g., "s3", "local")
+    pub state_backend: Option<String>,
+    /// Lock port for parallel execution control
+    pub lock_port: u16,
 }
 
 impl Default for RunParams {
     fn default() -> Self {
         Self {
-            work_dir: ".".to_string(),
+            work_dir: PathBuf::from("."),
             command: Vec::new(),
             env_vars: Vec::new(),
             auto_approve: false,
+            version: None,
+            runner_command: None,
+            extra_args: None,
+            state_backend: None,
+            lock_port: 65432,
         }
     }
 }
 
 impl RunParams {
     /// Create new run parameters with work directory
-    pub fn new(work_dir: impl Into<String>) -> Self {
+    pub fn new(work_dir: impl Into<PathBuf>) -> Self {
         Self {
             work_dir: work_dir.into(),
             ..Default::default()
@@ -56,6 +73,36 @@ impl RunParams {
     /// Set auto-approve
     pub fn with_auto_approve(mut self, auto_approve: bool) -> Self {
         self.auto_approve = auto_approve;
+        self
+    }
+
+    /// Set version
+    pub fn with_version(mut self, version: impl Into<String>) -> Self {
+        self.version = Some(version.into());
+        self
+    }
+
+    /// Set custom runner command/binary path
+    pub fn with_runner_command(mut self, cmd: impl Into<String>) -> Self {
+        self.runner_command = Some(cmd.into());
+        self
+    }
+
+    /// Set extra arguments
+    pub fn with_extra_args(mut self, args: impl Into<String>) -> Self {
+        self.extra_args = Some(args.into());
+        self
+    }
+
+    /// Set state backend
+    pub fn with_state_backend(mut self, backend: impl Into<String>) -> Self {
+        self.state_backend = Some(backend.into());
+        self
+    }
+
+    /// Set lock port
+    pub fn with_lock_port(mut self, port: u16) -> Self {
+        self.lock_port = port;
         self
     }
 }
@@ -162,11 +209,13 @@ mod tests {
         let params = RunParams::new("/tmp/work")
             .with_command("plan")
             .with_env("TF_VAR_env", "prod")
-            .with_auto_approve(true);
+            .with_auto_approve(true)
+            .with_version("1.6.6");
 
-        assert_eq!(params.work_dir, "/tmp/work");
+        assert_eq!(params.work_dir, PathBuf::from("/tmp/work"));
         assert_eq!(params.command, vec!["plan"]);
         assert!(params.auto_approve);
+        assert_eq!(params.version, Some("1.6.6".to_string()));
     }
 
     #[test]

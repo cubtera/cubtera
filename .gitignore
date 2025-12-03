@@ -46,3 +46,5 @@ example/.tmp
 .Trashes
 .VolumeIcon.icns
 .com.apple.timemachine.donotpresent
+.terraform
+*.lock.hcl

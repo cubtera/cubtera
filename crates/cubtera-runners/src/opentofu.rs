@@ -38,7 +38,7 @@ impl Runner for OpenTofuRunner {
         Ok(())
     }
 
-    async fn execute(&self, unit: &Unit, params: &RunParams) -> AppResult<RunResult> {
+    async fn execute(&self, _unit: &Unit, params: &RunParams) -> AppResult<RunResult> {
         let start = Instant::now();
 
         let mut cmd = Command::new(self.binary_path());
