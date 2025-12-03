@@ -50,7 +50,7 @@ toml = "0.8"
 walkdir = "2"
 chrono = "0.4"
 rand = "0.9"
-zip = "4.0.0"
+zip = "6.0.0"
 rocket = { version = "0.5", default-features = false, features = ["json"] }
 mongodb = { version = "3.2.3", features = ["sync", "dns-resolver"] }
 whoami = "1.6.0"
