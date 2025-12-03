@@ -19,13 +19,14 @@ fn v1_router() -> Router<Arc<AppState>> {
         .route("/orgs", get(orgs::list_orgs))
         .route("/{org}/dim-types", get(dimensions::list_dim_types))
         .route("/{org}/dims/{dim_type}", get(dimensions::list_dimensions))
-        .route(
-            "/{org}/dims/{dim_type}/{name}",
-            get(dimensions::get_dimension),
-        )
+        // NOTE: /defaults must come before /{name} to avoid being captured as a name parameter
         .route(
             "/{org}/dims/{dim_type}/defaults",
             get(dimensions::get_defaults),
+        )
+        .route(
+            "/{org}/dims/{dim_type}/{name}",
+            get(dimensions::get_dimension),
         )
 }
 
