@@ -64,7 +64,7 @@ git2 = "0.20"
 sha2 = "0.10.9"
 
 [dev-dependencies]
-mockall = "0.13"
+mockall = "0.14"
 assert_cmd = "2"
 predicates = "3"
 rand = "0.9"
