@@ -310,3 +310,271 @@ where
     let joined = list.join(":");
     serializer.serialize_str(&joined)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_default_config_values() {
+        let config = CubteraConfig::default();
+
+        assert_eq!(config.workspace_path, "~/.cubtera/workspace");
+        assert_eq!(config.temp_folder_path, "~/.cubtera/tmp");
+        assert_eq!(config.inventory_path, "~/.cubtera/workspace/inventory");
+        assert_eq!(config.units_path, "~/.cubtera/workspace/units");
+        assert_eq!(config.modules_path, "~/.cubtera/workspace/modules");
+        assert_eq!(config.plugins_path, "~/.cubtera/workspace/plugins");
+        assert_eq!(config.org, "cubtera");
+        assert_eq!(config.orgs, vec!["cubtera"]);
+        assert_eq!(config.dim_relations, vec!["dome", "env", "dc"]);
+        assert_eq!(config.file_name_separator, ":");
+        assert!(!config.clean_cache);
+        assert!(config.always_copy_files);
+        assert!(config.db.is_none());
+        assert!(config.dlog_db.is_none());
+        assert!(config.runner.is_none());
+        assert!(config.state.is_none());
+        assert!(config.db_client.is_none());
+    }
+
+    #[test]
+    fn test_new_equals_default() {
+        let config_new = CubteraConfig::new();
+        let config_default = CubteraConfig::default();
+
+        assert_eq!(config_new.workspace_path, config_default.workspace_path);
+        assert_eq!(config_new.org, config_default.org);
+        assert_eq!(config_new.orgs, config_default.orgs);
+        assert_eq!(config_new.dim_relations, config_default.dim_relations);
+    }
+
+    #[test]
+    fn test_default_path_functions() {
+        assert_eq!(default_workspace_path(), "~/.cubtera/workspace");
+        assert_eq!(default_temp_folder_path(), "~/.cubtera/tmp");
+        assert_eq!(default_units_folder(), "units");
+        assert_eq!(default_modules_folder(), "modules");
+        assert_eq!(default_plugins_folder(), "plugins");
+        assert_eq!(default_inventory_folder(), "inventory");
+        assert_eq!(default_org(), "cubtera");
+        assert_eq!(default_file_name_separator(), ":");
+    }
+
+    #[test]
+    fn test_default_dim_relations() {
+        let relations = default_dim_relations();
+        assert_eq!(relations.len(), 3);
+        assert_eq!(relations[0], "dome");
+        assert_eq!(relations[1], "env");
+        assert_eq!(relations[2], "dc");
+    }
+
+    #[test]
+    fn test_default_orgs() {
+        let orgs = default_orgs();
+        assert_eq!(orgs.len(), 1);
+        assert_eq!(orgs[0], "cubtera");
+    }
+
+    #[test]
+    fn test_define_path_with_explicit_path() {
+        let config = CubteraConfig::default();
+        let mut hashmap: HashMap<String, Value> = HashMap::new();
+        hashmap.insert("units_path".to_string(), json!("/custom/units/path"));
+
+        let result = config.define_path(hashmap, "units");
+        assert_eq!(result, "/custom/units/path");
+    }
+
+    #[test]
+    fn test_define_path_with_folder_override() {
+        let config = CubteraConfig::default();
+        let mut hashmap: HashMap<String, Value> = HashMap::new();
+        hashmap.insert("units_folder".to_string(), json!("custom_units"));
+
+        let result = config.define_path(hashmap, "units");
+        // When folder is specified, it uses path_type/ format
+        assert!(result.contains("units/"));
+    }
+
+    #[test]
+    fn test_define_path_defaults() {
+        let config = CubteraConfig::default();
+        let hashmap: HashMap<String, Value> = HashMap::new();
+
+        let units_path = config.define_path(hashmap.clone(), "units");
+        let modules_path = config.define_path(hashmap.clone(), "modules");
+        let plugins_path = config.define_path(hashmap.clone(), "plugins");
+        let inventory_path = config.define_path(hashmap.clone(), "inventory");
+
+        assert!(units_path.ends_with("units"));
+        assert!(modules_path.ends_with("modules"));
+        assert!(plugins_path.ends_with("plugins"));
+        assert!(inventory_path.ends_with("inventory"));
+    }
+
+    #[test]
+    fn test_get_runner_by_type_none() {
+        let config = CubteraConfig::default();
+        let result = config.get_runner_by_type("tf");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_runner_by_type_exists() {
+        let mut config = CubteraConfig::default();
+        let mut tf_runner: HashMap<String, String> = HashMap::new();
+        tf_runner.insert("version".to_string(), "1.5.0".to_string());
+        tf_runner.insert("state_backend".to_string(), "s3".to_string());
+
+        let mut runners: HashMap<String, HashMap<String, String>> = HashMap::new();
+        runners.insert("tf".to_string(), tf_runner);
+        config.runner = Some(runners);
+
+        let result = config.get_runner_by_type("tf");
+        assert!(result.is_some());
+        let runner = result.unwrap();
+        assert_eq!(runner.get("version"), Some(&"1.5.0".to_string()));
+        assert_eq!(runner.get("state_backend"), Some(&"s3".to_string()));
+    }
+
+    #[test]
+    fn test_get_runner_by_type_wrong_type() {
+        let mut config = CubteraConfig::default();
+        let mut tf_runner: HashMap<String, String> = HashMap::new();
+        tf_runner.insert("version".to_string(), "1.5.0".to_string());
+
+        let mut runners: HashMap<String, HashMap<String, String>> = HashMap::new();
+        runners.insert("tf".to_string(), tf_runner);
+        config.runner = Some(runners);
+
+        let result = config.get_runner_by_type("bash");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_values() {
+        let config = CubteraConfig::default();
+        let result = config.get_values();
+
+        assert!(result.is_ok());
+        let value = result.unwrap();
+        assert!(value.is_object());
+        assert_eq!(value["org"], "cubtera");
+        assert_eq!(value["workspace_path"], "~/.cubtera/workspace");
+    }
+
+    #[test]
+    fn test_get_json() {
+        let config = CubteraConfig::default();
+        let json_str = config.get_json();
+
+        assert!(!json_str.is_empty());
+        assert!(json_str.contains("cubtera"));
+        assert!(json_str.contains("workspace_path"));
+
+        // Verify it's valid JSON
+        let parsed: Result<Value, _> = serde_json::from_str(&json_str);
+        assert!(parsed.is_ok());
+    }
+
+    #[test]
+    fn test_get_toml() {
+        let config = CubteraConfig::default();
+        let toml_str = config.get_toml();
+
+        assert!(!toml_str.is_empty());
+        assert!(toml_str.contains("cubtera"));
+        assert!(toml_str.contains("workspace_path"));
+    }
+
+    #[test]
+    fn test_get_db_none() {
+        let config = CubteraConfig::default();
+        let result = config.get_db();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_config_serialization_roundtrip() {
+        let config = CubteraConfig::default();
+
+        // Serialize to JSON
+        let json_str = serde_json::to_string(&config).unwrap();
+
+        // Deserialize back
+        let deserialized: CubteraConfig = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(config.workspace_path, deserialized.workspace_path);
+        assert_eq!(config.org, deserialized.org);
+        assert_eq!(config.orgs, deserialized.orgs);
+        assert_eq!(config.dim_relations, deserialized.dim_relations);
+    }
+
+    #[test]
+    fn test_colon_list_serialization() {
+        let config = CubteraConfig::default();
+        let toml_str = config.get_toml();
+
+        // orgs and dim_relations should be serialized as colon-separated strings
+        assert!(toml_str.contains("orgs = \"cubtera\"") || toml_str.contains("orgs = 'cubtera'"));
+        assert!(
+            toml_str.contains("dim_relations = \"dome:env:dc\"")
+                || toml_str.contains("dim_relations = 'dome:env:dc'")
+        );
+    }
+
+    #[test]
+    fn test_config_with_optional_fields() {
+        let mut config = CubteraConfig::default();
+        config.db = Some("mongodb://localhost:27017".to_string());
+        config.dlog_db = Some("mongodb://localhost:27017/dlog".to_string());
+        config.dlog_job_user_name_env = Some("USER".to_string());
+        config.dlog_job_number_env = Some("BUILD_NUMBER".to_string());
+        config.dlog_job_name_env = Some("JOB_NAME".to_string());
+
+        let json_str = config.get_json();
+        assert!(json_str.contains("mongodb://localhost:27017"));
+        assert!(json_str.contains("USER"));
+        assert!(json_str.contains("BUILD_NUMBER"));
+        assert!(json_str.contains("JOB_NAME"));
+    }
+
+    #[test]
+    fn test_config_with_state_backend() {
+        let mut config = CubteraConfig::default();
+
+        let mut s3_config: HashMap<String, String> = HashMap::new();
+        s3_config.insert("bucket".to_string(), "my-bucket".to_string());
+        s3_config.insert("region".to_string(), "us-east-1".to_string());
+        s3_config.insert("key".to_string(), "{{ dim_tree }}/{{ unit_name }}.tfstate".to_string());
+
+        let mut state: HashMap<String, HashMap<String, String>> = HashMap::new();
+        state.insert("s3".to_string(), s3_config);
+        config.state = Some(state);
+
+        let json_str = config.get_json();
+        assert!(json_str.contains("my-bucket"));
+        assert!(json_str.contains("us-east-1"));
+    }
+
+    #[test]
+    fn test_deserialize_from_json_with_colon_lists() {
+        let json = json!({
+            "workspace_path": "/custom/workspace",
+            "org": "myorg",
+            "orgs": "org1:org2:org3",
+            "dim_relations": "a:b:c:d"
+        });
+
+        let config: CubteraConfig = serde_json::from_value(json).unwrap();
+
+        assert_eq!(config.workspace_path, "/custom/workspace");
+        assert_eq!(config.org, "myorg");
+        assert_eq!(config.orgs, vec!["org1", "org2", "org3"]);
+        assert_eq!(config.dim_relations, vec!["a", "b", "c", "d"]);
+    }
+}

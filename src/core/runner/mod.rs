@@ -332,3 +332,184 @@ fn apply_template_to_value(
         _ => value.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_runner_type_str_to_runner_type_tf() {
+        let runner_type = RunnerType::str_to_runner_type("tf");
+        assert!(matches!(runner_type, RunnerType::TF));
+
+        let runner_type = RunnerType::str_to_runner_type("TF");
+        assert!(matches!(runner_type, RunnerType::TF));
+
+        let runner_type = RunnerType::str_to_runner_type("Tf");
+        assert!(matches!(runner_type, RunnerType::TF));
+    }
+
+    #[test]
+    fn test_runner_type_str_to_runner_type_bash() {
+        let runner_type = RunnerType::str_to_runner_type("bash");
+        assert!(matches!(runner_type, RunnerType::BASH));
+
+        let runner_type = RunnerType::str_to_runner_type("BASH");
+        assert!(matches!(runner_type, RunnerType::BASH));
+    }
+
+    #[test]
+    fn test_runner_type_str_to_runner_type_tofu() {
+        let runner_type = RunnerType::str_to_runner_type("tofu");
+        assert!(matches!(runner_type, RunnerType::TOFU));
+
+        let runner_type = RunnerType::str_to_runner_type("TOFU");
+        assert!(matches!(runner_type, RunnerType::TOFU));
+    }
+
+    #[test]
+    fn test_runner_type_str_to_runner_type_unknown() {
+        let runner_type = RunnerType::str_to_runner_type("unknown");
+        assert!(matches!(runner_type, RunnerType::UNKNOWN));
+
+        let runner_type = RunnerType::str_to_runner_type("");
+        assert!(matches!(runner_type, RunnerType::UNKNOWN));
+
+        let runner_type = RunnerType::str_to_runner_type("helm");
+        assert!(matches!(runner_type, RunnerType::UNKNOWN));
+    }
+
+    #[test]
+    fn test_apply_template_to_value_string() {
+        let mut handlebars = handlebars::Handlebars::new();
+        handlebars.set_strict_mode(false); // Allow missing variables
+
+        let data = json!({
+            "org": "myorg",
+            "unit_name": "network"
+        });
+
+        let template = json!("{{ org }}-bucket");
+        let result = apply_template_to_value(&template, &handlebars, &data);
+
+        assert_eq!(result, json!("myorg-bucket"));
+    }
+
+    #[test]
+    fn test_apply_template_to_value_nested_object() {
+        let mut handlebars = handlebars::Handlebars::new();
+        handlebars.set_strict_mode(false);
+
+        let data = json!({
+            "org": "myorg",
+            "region": "us-east-1"
+        });
+
+        let template = json!({
+            "bucket": "{{ org }}-state",
+            "region": "{{ region }}",
+            "nested": {
+                "key": "{{ org }}/{{ region }}/state"
+            }
+        });
+
+        let result = apply_template_to_value(&template, &handlebars, &data);
+
+        assert_eq!(result["bucket"], "myorg-state");
+        assert_eq!(result["region"], "us-east-1");
+        assert_eq!(result["nested"]["key"], "myorg/us-east-1/state");
+    }
+
+    #[test]
+    fn test_apply_template_to_value_array() {
+        let mut handlebars = handlebars::Handlebars::new();
+        handlebars.set_strict_mode(false);
+
+        let data = json!({
+            "name": "test"
+        });
+
+        let template = json!(["{{ name }}", "static", "{{ name }}-suffix"]);
+        let result = apply_template_to_value(&template, &handlebars, &data);
+
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0], "test");
+        assert_eq!(arr[1], "static");
+        assert_eq!(arr[2], "test-suffix");
+    }
+
+    #[test]
+    fn test_apply_template_to_value_non_string_values() {
+        let mut handlebars = handlebars::Handlebars::new();
+        handlebars.set_strict_mode(false);
+
+        let data = json!({});
+
+        // Numbers, booleans, and null should be unchanged
+        let number = json!(42);
+        assert_eq!(apply_template_to_value(&number, &handlebars, &data), json!(42));
+
+        let boolean = json!(true);
+        assert_eq!(apply_template_to_value(&boolean, &handlebars, &data), json!(true));
+
+        let null = json!(null);
+        assert_eq!(apply_template_to_value(&null, &handlebars, &data), json!(null));
+    }
+
+    #[test]
+    fn test_apply_template_to_value_no_template() {
+        let mut handlebars = handlebars::Handlebars::new();
+        handlebars.set_strict_mode(false);
+
+        let data = json!({});
+
+        let value = json!("static-string");
+        let result = apply_template_to_value(&value, &handlebars, &data);
+
+        assert_eq!(result, json!("static-string"));
+    }
+
+    #[test]
+    fn test_apply_template_to_value_complex_path() {
+        let mut handlebars = handlebars::Handlebars::new();
+        handlebars.set_strict_mode(false);
+
+        let data = json!({
+            "org": "cubtera",
+            "unit_name": "network",
+            "dim_tree": "dome:prod/env:production/dc:us-east-1"
+        });
+
+        let template = json!({
+            "s3": {
+                "bucket": "{{ org }}-tfstate",
+                "key": "{{ dim_tree }}/{{ unit_name }}.tfstate",
+                "region": "us-east-1"
+            }
+        });
+
+        let result = apply_template_to_value(&template, &handlebars, &data);
+
+        assert_eq!(result["s3"]["bucket"], "cubtera-tfstate");
+        assert_eq!(
+            result["s3"]["key"],
+            "dome:prod/env:production/dc:us-east-1/network.tfstate"
+        );
+        assert_eq!(result["s3"]["region"], "us-east-1");
+    }
+
+    #[test]
+    fn test_runner_type_clone() {
+        let runner_type = RunnerType::TF;
+        let cloned = runner_type.clone();
+        assert!(matches!(cloned, RunnerType::TF));
+    }
+
+    #[test]
+    fn test_runner_type_debug() {
+        let runner_type = RunnerType::TF;
+        let debug_str = format!("{:?}", runner_type);
+        assert_eq!(debug_str, "TF");
+    }
+}
