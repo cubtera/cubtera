@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.16](https://github.com/cubtera/cubtera/compare/v1.0.15...v1.0.16) (2025-12-03)
+
+
+### Bug Fixes
+
+* **dependabot:** update jsonschema requirement from 0.28 to 0.29 ([#39](https://github.com/cubtera/cubtera/issues/39)) ([6ec911c](https://github.com/cubtera/cubtera/commit/6ec911c98ce9d5d9f02b2e97ec55aa7a9a10e4ee))
+* **dependabot:** update jsonschema requirement from 0.30 to 0.37 ([#50](https://github.com/cubtera/cubtera/issues/50)) ([dca00ab](https://github.com/cubtera/cubtera/commit/dca00ab003b51a92a840e7e20a8c05d4304beae3))
+* **dependabot:** update mockall requirement from 0.13 to 0.14 ([#49](https://github.com/cubtera/cubtera/issues/49)) ([443cecc](https://github.com/cubtera/cubtera/commit/443ceccdd8a7aac36636d11a0a6d6c2f020fa929))
+* **dependabot:** update toml requirement from 0.8 to 0.9 ([#44](https://github.com/cubtera/cubtera/issues/44)) ([99665c4](https://github.com/cubtera/cubtera/commit/99665c46282d870d2b2e405333662c976838610e))
+* **dependabot:** update zip requirement from 4.0.0 to 6.0.0 ([#48](https://github.com/cubtera/cubtera/issues/48)) ([7b111f9](https://github.com/cubtera/cubtera/commit/7b111f9ea16e7ad03a994975df85badc108300a0))
+* **dim:** change log severity lvl ([aff8020](https://github.com/cubtera/cubtera/commit/aff8020cccc76a9453721ee7ade1448f5d1a07a2))
+* **example:** refactor example files ([2d770de](https://github.com/cubtera/cubtera/commit/2d770de56478e5d838397626bd23e07e2a851264))
+* **lib:** update crates versions ([cd4d1be](https://github.com/cubtera/cubtera/commit/cd4d1bea91fba922bdab86d0339a1c276f7258d7))
+* **lib:** update zip crate to 4.0 ([616dcab](https://github.com/cubtera/cubtera/commit/616dcaba4319f8e7eb48ea8e4af2ade8ef4a4321))
+
 ## [1.0.15](https://github.com/cubtera/cubtera/compare/v1.0.14...v1.0.15) (2025-02-02)
 
 
