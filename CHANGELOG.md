@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.2](https://github.com/cubtera/cubtera/compare/v1.1.1...v1.1.2) (2026-01-19)
+
+
+### Bug Fixes
+
+* **dependabot:** update jsonschema requirement from 0.37 to 0.38 ([#56](https://github.com/cubtera/cubtera/issues/56)) ([ab7a97d](https://github.com/cubtera/cubtera/commit/ab7a97d068a64fa865a65d9bdfa30dc3b66969ac))
+* **dependabot:** update zip requirement from 6.0.0 to 7.0.0 ([#55](https://github.com/cubtera/cubtera/issues/55)) ([389fa7f](https://github.com/cubtera/cubtera/commit/389fa7f654ddae136b8f6923b91028a7b15b4fbe))
+
 ## [1.1.1](https://github.com/cubtera/cubtera/compare/v1.1.0...v1.1.1) (2025-12-22)
 
 
