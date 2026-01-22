@@ -104,6 +104,10 @@ jobs:
           sudo update-ca-certificates
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           export PATH=$PATH:$HOME/.cargo/bin
+          
+      - name: Add target toolchain
+        if: ${{ matrix.name == 'linux-arm64' }}
+        run: |
           rustup target add aarch64-linux-musl-gcc
 
       - name: Generate Cargo.lock and set target toolchain
