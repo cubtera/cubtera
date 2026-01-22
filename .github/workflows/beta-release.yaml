@@ -59,7 +59,7 @@ jobs:
       matrix:
         name: [
             linux,
-            macos,
+            linux-arm64,
             macos-arm64
         ]
         include:
@@ -68,13 +68,13 @@ jobs:
             target: x86_64-unknown-linux-musl
             asset_name: cubtera-linux-intel
 
-          - name: macos
-            os: macos-13
-            target: x86_64-apple-darwin
-            asset_name: cubtera-darwin-intel
+          - name: linux-arm64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-musl
+            asset_name: cubtera-linux-arm64
 
           - name: macos-arm64
-            os: macos-13
+            os: macos-15
             target: aarch64-apple-darwin
             asset_name: cubtera-darwin-aarch64
 
@@ -97,13 +97,18 @@ jobs:
           cargo update --workspace --offline || cargo update --workspace
 
       - name: Pre-build install ${{ matrix.name }}
-        if: ${{ matrix.name == 'linux' }}
+        if: ${{ matrix.name == 'linux' || matrix.name == 'linux-arm64' }}
         run: |
           sudo apt update
           sudo apt install -y -qq curl gcc pkg-config musl-tools libssl-dev
           sudo update-ca-certificates
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           export PATH=$PATH:$HOME/.cargo/bin
+
+      # - name: Add target toolchain
+      #   if: ${{ matrix.name == 'linux-arm64' }}
+      #   run: |
+      #     rustup target add aarch64-linux-musl-gcc
 
       - name: Generate Cargo.lock and set target toolchain
         run: |
@@ -289,12 +294,12 @@ jobs:
     if: ${{ needs.create_beta_release.outputs.release_created == 'true' }} 
     strategy:
       matrix:
-        name: [linux, macos, macos-arm64]
+        name: [linux, linux-arm64, macos-arm64]
         include:
           - name: linux
             asset_name: cubtera-linux-intel
-          - name: macos
-            asset_name: cubtera-darwin-intel
+          - name: linux-arm64
+            asset_name: cubtera-linux-arm64
           - name: macos-arm64
             asset_name: cubtera-darwin-aarch64
     steps:
@@ -379,7 +384,7 @@ jobs:
           VERSION="${{ needs.generate_beta_version.outputs.beta_version }}"
           BASE_URL="https://github.com/cubtera/cubtera/releases/download/v${VERSION}" 
           LINUX_INTEL_SHA256_ZIP=$(curl -sL $BASE_URL/cubtera-linux-intel-beta.zip | shasum -a 256 | cut -d ' ' -f 1)
-          MAC_INTEL_SHA256_ZIP=$(curl -sL $BASE_URL/cubtera-darwin-intel-beta.zip | shasum -a 256 | cut -d ' ' -f 1)
+          LINUX_ARM64_SHA256_ZIP=$(curl -sL $BASE_URL/cubtera-linux-arm64-beta.zip | shasum -a 256 | cut -d ' ' -f 1)
           MAC_AARCH64_SHA256_ZIP=$(curl -sL $BASE_URL/cubtera-darwin-aarch64-beta.zip | shasum -a 256 | cut -d ' ' -f 1)
 
           cat << EOF > payload.json
@@ -387,9 +392,9 @@ jobs:
             "event_type": "update_beta_formula",
             "client_payload": {
               "version": "${VERSION}",
-              "mac_intel_zip_sha": "${MAC_INTEL_SHA256_ZIP}",
               "mac_aarch_zip_sha": "${MAC_AARCH64_SHA256_ZIP}",
-              "linux_intel_zip_sha": "${LINUX_INTEL_SHA256_ZIP}"
+              "linux_intel_zip_sha": "${LINUX_INTEL_SHA256_ZIP}",
+              "linux_arm64_zip_sha": "${LINUX_ARM64_SHA256_ZIP}"
             }
           }
           EOF
