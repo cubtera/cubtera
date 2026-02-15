@@ -408,3 +408,367 @@ fn copy_files_from_manifest(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::dim::Dim;
+    use std::fs;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    // Helper to create a minimal Dim for testing
+    // Note: Only sets public fields since dim_path and data are private
+    fn create_test_dim(dim_type: &str, dim_name: &str) -> Dim {
+        let mut dim = Dim::default();
+        dim.dim_name = dim_name.to_string();
+        dim.dim_type = dim_type.to_string();
+        dim.key_path = PathBuf::from(format!("{}:{}", dim_type, dim_name));
+        dim.data_sha = "test_sha".to_string();
+        dim
+    }
+
+    // Helper to create a minimal Unit for testing
+    fn create_test_unit(name: &str, dims: Vec<Dim>, extensions: Vec<String>) -> Unit {
+        let manifest = Manifest {
+            dimensions: dims.iter().map(|d| d.dim_type.clone()).collect(),
+            overwrite: false,
+            opt_dims: None,
+            allow_list: None,
+            deny_list: None,
+            affinity_tags: None,
+            unit_type: "tf".to_string(),
+            spec: None,
+            runner: None,
+            state: None,
+        };
+
+        Unit {
+            name: name.to_string(),
+            manifest,
+            temp_folder: PathBuf::from("/tmp/test"),
+            extensions,
+            dimensions: dims,
+            opt_dims: None,
+            unit_folder: PathBuf::from("/tmp/unit"),
+            generic_unit_folder: None,
+        }
+    }
+
+    #[test]
+    fn test_get_name() {
+        let unit = create_test_unit("my-unit", vec![], vec![]);
+        assert_eq!(unit.get_name(), "my-unit");
+    }
+
+    #[test]
+    fn test_get_unit_state_path_single_dim() {
+        let dim = create_test_dim("env", "prod");
+        let unit = create_test_unit("test-unit", vec![dim], vec![]);
+
+        let state_path = unit.get_unit_state_path();
+        assert_eq!(state_path, "env:prod");
+    }
+
+    #[test]
+    fn test_get_unit_state_path_multiple_dims() {
+        let dim1 = create_test_dim("env", "prod");
+        let dim2 = create_test_dim("dc", "us-east-1");
+        let unit = create_test_unit("test-unit", vec![dim1, dim2], vec![]);
+
+        let state_path = unit.get_unit_state_path();
+        assert_eq!(state_path, "env:prod/dc:us-east-1");
+    }
+
+    #[test]
+    fn test_get_unit_state_path_with_extensions() {
+        let dim = create_test_dim("env", "prod");
+        let unit = create_test_unit(
+            "test-unit",
+            vec![dim],
+            vec!["index:0".to_string(), "replica:1".to_string()],
+        );
+
+        let state_path = unit.get_unit_state_path();
+        assert_eq!(state_path, "env:prod/index:0/replica:1");
+    }
+
+    #[test]
+    fn test_get_unit_state_path_empty() {
+        let unit = create_test_unit("test-unit", vec![], vec![]);
+
+        let state_path = unit.get_unit_state_path();
+        assert_eq!(state_path, "");
+    }
+
+    #[test]
+    fn test_get_dims_blob_sha() {
+        let mut dim1 = create_test_dim("env", "prod");
+        dim1.data_sha = "sha1".to_string();
+
+        let mut dim2 = create_test_dim("dc", "us-east-1");
+        dim2.data_sha = "sha2".to_string();
+
+        let unit = create_test_unit("test-unit", vec![dim1, dim2], vec![]);
+
+        let shas = unit.get_dims_blob_sha();
+
+        assert_eq!(shas.len(), 2);
+        assert_eq!(shas.get("env:prod"), Some(&"sha1".to_string()));
+        assert_eq!(shas.get("dc:us-east-1"), Some(&"sha2".to_string()));
+    }
+
+    #[test]
+    fn test_get_env_vars_none() {
+        let unit = create_test_unit("test-unit", vec![], vec![]);
+
+        let env_vars = unit.get_env_vars();
+        assert!(env_vars.is_none());
+    }
+
+    #[test]
+    fn test_get_env_vars_with_spec() {
+        use crate::core::unit::manifest::{EnvVars, Spec};
+
+        // Set an env var for testing
+        std::env::set_var("TEST_VAR_FOR_UNIT", "test_value");
+
+        let mut required: HashMap<String, String> = HashMap::new();
+        required.insert("test_key".to_string(), "TEST_VAR_FOR_UNIT".to_string());
+
+        let env_vars = EnvVars {
+            required: Some(required),
+            optional: None,
+        };
+
+        let spec = Spec {
+            tf_version: None,
+            env_vars: Some(env_vars),
+            files: None,
+        };
+
+        let manifest = Manifest {
+            dimensions: vec![],
+            overwrite: false,
+            opt_dims: None,
+            allow_list: None,
+            deny_list: None,
+            affinity_tags: None,
+            unit_type: "tf".to_string(),
+            spec: Some(spec),
+            runner: None,
+            state: None,
+        };
+
+        let unit = Unit {
+            name: "test-unit".to_string(),
+            manifest,
+            temp_folder: PathBuf::from("/tmp/test"),
+            extensions: vec![],
+            dimensions: vec![],
+            opt_dims: None,
+            unit_folder: PathBuf::from("/tmp/unit"),
+            generic_unit_folder: None,
+        };
+
+        let result = unit.get_env_vars();
+        assert!(result.is_some());
+        let vars = result.unwrap();
+        assert_eq!(vars.get("TEST_VAR_FOR_UNIT"), Some(&"test_value".to_string()));
+
+        // Clean up
+        std::env::remove_var("TEST_VAR_FOR_UNIT");
+    }
+
+    #[test]
+    fn test_unit_struct_fields() {
+        let dim = create_test_dim("env", "prod");
+        let unit = create_test_unit("my-unit", vec![dim.clone()], vec!["ext:val".to_string()]);
+
+        assert_eq!(unit.name, "my-unit");
+        assert_eq!(unit.extensions, vec!["ext:val"]);
+        assert_eq!(unit.dimensions.len(), 1);
+        assert_eq!(unit.dimensions[0].dim_name, "prod");
+        assert_eq!(unit.manifest.unit_type, "tf");
+        assert!(!unit.manifest.overwrite);
+    }
+
+    #[test]
+    fn test_manifest_load_from_path() {
+        let dir = tempdir().unwrap();
+        let manifest_content = r#"
+dimensions = ["env", "dc"]
+type = "tf"
+overwrite = true
+"#;
+        let manifest_path = dir.path().join("manifest.toml");
+        let mut file = fs::File::create(&manifest_path).unwrap();
+        write!(file, "{}", manifest_content).unwrap();
+
+        let manifest = Manifest::load(dir.path()).unwrap();
+
+        assert_eq!(manifest.dimensions, vec!["env", "dc"]);
+        assert_eq!(manifest.unit_type, "tf");
+        assert!(manifest.overwrite);
+    }
+
+    #[test]
+    fn test_remove_temp_folder_nonexistent() {
+        let unit = create_test_unit("test-unit", vec![], vec![]);
+        // Should not panic when folder doesn't exist
+        unit.remove_temp_folder();
+    }
+
+    #[test]
+    fn test_remove_temp_folder_exists() {
+        let dir = tempdir().unwrap();
+        let temp_path = dir.path().join("unit_temp");
+        fs::create_dir_all(&temp_path).unwrap();
+        fs::write(temp_path.join("test.txt"), "test").unwrap();
+
+        let manifest = Manifest {
+            dimensions: vec![],
+            overwrite: false,
+            opt_dims: None,
+            allow_list: None,
+            deny_list: None,
+            affinity_tags: None,
+            unit_type: "tf".to_string(),
+            spec: None,
+            runner: None,
+            state: None,
+        };
+
+        let unit = Unit {
+            name: "test".to_string(),
+            manifest,
+            temp_folder: temp_path.clone(),
+            extensions: vec![],
+            dimensions: vec![],
+            opt_dims: None,
+            unit_folder: PathBuf::from("/tmp/unit"),
+            generic_unit_folder: None,
+        };
+
+        assert!(temp_path.exists());
+        unit.remove_temp_folder();
+        assert!(!temp_path.exists());
+    }
+
+    #[test]
+    fn test_copy_files_from_manifest_nonexistent() {
+        let dir = tempdir().unwrap();
+        let mut files: HashMap<String, String> = HashMap::new();
+        files.insert("/nonexistent/file".to_string(), "dest.txt".to_string());
+
+        // The callback is called for nonexistent files
+        // Just verify the function doesn't panic and completes
+        copy_files_from_manifest(files, dir.path(), |src| {
+            // This should be called with the nonexistent source path
+            assert_eq!(src, "/nonexistent/file");
+        });
+
+        // The destination file should NOT exist since source didn't exist
+        let dest_file = dir.path().join("dest.txt");
+        assert!(!dest_file.exists());
+    }
+
+    #[test]
+    fn test_copy_files_from_manifest_existent() {
+        let dir = tempdir().unwrap();
+        let src_path = dir.path().join("source.txt");
+        fs::write(&src_path, "test content").unwrap();
+
+        let dest_dir = tempdir().unwrap();
+
+        let mut files: HashMap<String, String> = HashMap::new();
+        files.insert(src_path.to_str().unwrap().to_string(), "dest.txt".to_string());
+
+        copy_files_from_manifest(files, dest_dir.path(), |_| {
+            panic!("Should not be called for existing files");
+        });
+
+        let dest_file = dest_dir.path().join("dest.txt");
+        assert!(dest_file.exists());
+        assert_eq!(fs::read_to_string(dest_file).unwrap(), "test content");
+    }
+
+    #[test]
+    fn test_unit_with_multiple_dimensions_state_path() {
+        let mut dim1 = Dim::default();
+        dim1.dim_name = "mgmt".to_string();
+        dim1.dim_type = "dome".to_string();
+        dim1.key_path = PathBuf::from("dome:mgmt");
+        dim1.data_sha = "sha1".to_string();
+
+        let mut dim2 = Dim::default();
+        dim2.dim_name = "prod".to_string();
+        dim2.dim_type = "env".to_string();
+        dim2.key_path = PathBuf::from("dome:mgmt/env:prod");
+        dim2.data_sha = "sha2".to_string();
+
+        let mut dim3 = Dim::default();
+        dim3.dim_name = "us-east-1".to_string();
+        dim3.dim_type = "dc".to_string();
+        dim3.key_path = PathBuf::from("dome:mgmt/env:prod/dc:us-east-1");
+        dim3.data_sha = "sha3".to_string();
+
+        let unit = create_test_unit("network", vec![dim1, dim2, dim3], vec![]);
+
+        let state_path = unit.get_unit_state_path();
+        assert_eq!(state_path, "dome:mgmt/dome:mgmt/env:prod/dome:mgmt/env:prod/dc:us-east-1");
+    }
+
+    #[test]
+    fn test_unit_manifest_with_runner_config() {
+        let mut runner: HashMap<String, String> = HashMap::new();
+        runner.insert("version".to_string(), "1.5.0".to_string());
+        runner.insert("state_backend".to_string(), "s3".to_string());
+
+        let manifest = Manifest {
+            dimensions: vec!["env".to_string()],
+            overwrite: false,
+            opt_dims: None,
+            allow_list: None,
+            deny_list: None,
+            affinity_tags: None,
+            unit_type: "tf".to_string(),
+            spec: None,
+            runner: Some(runner),
+            state: None,
+        };
+
+        let unit = Unit {
+            name: "test".to_string(),
+            manifest,
+            temp_folder: PathBuf::from("/tmp"),
+            extensions: vec![],
+            dimensions: vec![],
+            opt_dims: None,
+            unit_folder: PathBuf::from("/tmp/unit"),
+            generic_unit_folder: None,
+        };
+
+        assert!(unit.manifest.runner.is_some());
+        let runner = unit.manifest.runner.as_ref().unwrap();
+        assert_eq!(runner.get("version"), Some(&"1.5.0".to_string()));
+    }
+
+    #[test]
+    fn test_unit_extensions_parsing() {
+        let unit = create_test_unit(
+            "test",
+            vec![],
+            vec![
+                "index:0".to_string(),
+                "replica:primary".to_string(),
+                "shard:1".to_string(),
+            ],
+        );
+
+        assert_eq!(unit.extensions.len(), 3);
+        assert!(unit.extensions.contains(&"index:0".to_string()));
+        assert!(unit.extensions.contains(&"replica:primary".to_string()));
+        assert!(unit.extensions.contains(&"shard:1".to_string()));
+    }
+}
