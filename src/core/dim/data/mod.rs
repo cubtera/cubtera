@@ -4,16 +4,11 @@ mod mongodb;
 use crate::globals::GLOBAL_CFG;
 use serde_json::Value;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Storage {
+    #[default]
     FS,
     DB,
-}
-
-impl Default for Storage {
-    fn default() -> Self {
-        Storage::FS
-    }
 }
 
 impl Storage {
@@ -21,7 +16,7 @@ impl Storage {
         match s {
             "fs" => Storage::FS,
             "db" => Storage::DB,
-            _ => unreachable!("Unknown storage type"),
+            _ => panic!("Unknown storage type"),
         }
     }
 
@@ -123,3 +118,41 @@ pub fn data_src_init(org: &str, dim_type: &str, storage: Storage) -> Box<dyn Dat
 //         }
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_storage_from_str() {
+        assert_eq!(Storage::from_str("fs"), Storage::FS);
+        assert_eq!(Storage::from_str("db"), Storage::DB);
+    }
+
+    // #[test]
+    // #[should_panic(expected = "Unknown storage type")]
+    // fn test_storage_from_str_invalid() {
+    //     Storage::from_str("invalid");
+    // }
+
+    #[test]
+    fn test_storage_to_str() {
+        assert_eq!(Storage::FS.to_str(), "fs");
+        assert_eq!(Storage::DB.to_str(), "db");
+    }
+
+    #[test]
+    fn test_storage_get_defaults_prefix() {
+        assert_eq!(Storage::FS.get_defaults_prefix(), ".defaults:");
+        assert_eq!(Storage::DB.get_defaults_prefix(), "_defaults:");
+    }
+
+    // #[test]
+    // fn test_data_src_init() {
+    //     let fs_source = data_src_init("test_org", "test_type", Storage::FS);
+    //     assert!(fs_source.get_context().is_none());
+
+    //     let db_source = data_src_init("test_org", "test_type", Storage::DB);
+    //     assert!(db_source.get_context().is_none());
+    // }
+}

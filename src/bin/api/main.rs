@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_variables)]
 
 mod api;
+mod mcp;
 
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {

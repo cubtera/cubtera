@@ -1,6 +1,6 @@
 dimensions = ["dome"]
 allowList = ["mgmt", "stg"]
-type = "tofu"
+type = "deck"
 
 [runner]
 state_backend = "local" # state backend for the runner defined in config.toml, default is local

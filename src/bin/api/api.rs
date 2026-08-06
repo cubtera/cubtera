@@ -1,6 +1,7 @@
 use cubtera::prelude::*;
 use rocket::serde::json::{json, Value};
 use rocket::{catch, catchers, get, launch, routes, Build, Request, Rocket};
+use super::mcp;
 
 #[get("/<org>/dimTypes")] // -> list of all dim types in org
 async fn dim_types(org: &str) -> Value {
@@ -114,6 +115,16 @@ pub async fn rocket() -> Rocket<Build> {
             ],
         )
         .mount("/", routes![health])
+        .mount(
+            "/mcp",
+            routes![
+                mcp::list_mcp_functions,
+                mcp::get_function_manifest,
+                mcp::get_mcp_version,
+                mcp::get_documentation,
+                mcp::invoke_function,
+            ],
+        )
         .register("/", catchers![not_found])
     //.manage(client)
     //.launch().await?;

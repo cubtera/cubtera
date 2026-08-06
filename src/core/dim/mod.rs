@@ -688,4 +688,50 @@ mod tests {
         assert!(builder.datasource.get_context().is_some());
         assert_eq!(builder.datasource.get_context().unwrap(), "test_context");
     }
+
+    // #[test]
+    // fn test_save_dim_includes() {
+    //     let temp_dir = TempDir::new().unwrap();
+    //     let mut dim = create_test_dim();
+    //     dim.dim_path = temp_dir.path().to_path_buf();
+    //     
+    //     // Create a test file
+    //     let test_file = temp_dir.path().join("test_dim:test.txt");
+    //     std::fs::write(&test_file, "test content").unwrap();
+    //     
+    //     let result = dim.save_dim_includes(temp_dir.path().to_path_buf());
+    //     assert!(result.is_ok());
+    // }
+    // 
+    // #[test]
+    // fn test_save_dim_folders() {
+    //     let temp_dir = TempDir::new().unwrap();
+    //     let mut dim = create_test_dim();
+    //     dim.dim_path = temp_dir.path().to_path_buf();
+    //     
+    //     // Create a test folder
+    //     let test_folder = temp_dir.path().join("test_dim:folder");
+    //     std::fs::create_dir(&test_folder).unwrap();
+    //     
+    //     let result = dim.save_dim_folders(temp_dir.path().to_path_buf());
+    //     assert!(result.is_ok());
+    // }
+    // 
+    // #[test]
+    // fn test_dim_builder_new_from_cli() {
+    //     let storage = Storage::FS;
+    //     let dim = DimBuilder::new_from_cli("test_type:test_name", "test_org", &storage, None);
+    //     
+    //     assert_eq!(dim.dim_type, "test_type");
+    //     assert_eq!(dim.dim_name, "test_name");
+    // }
+    // 
+    // #[test]
+    // fn test_dim_builder_get_all_kids_by_name() {
+    //     let builder = DimBuilder::new("test_type", "test_org", &Storage::FS);
+    //     let kids = builder.get_all_kids_by_name();
+    //     
+    //     // Initially should be empty since no dim_relations are configured
+    //     assert!(kids.is_empty());
+    // }
 }

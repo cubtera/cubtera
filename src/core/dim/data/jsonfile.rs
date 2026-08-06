@@ -243,4 +243,39 @@ mod tests {
         assert!(result.contains(&dim_type2.to_string()));
         assert!(result.contains(&dim_type3.to_string()));
     }
+
+    // #[test]
+    // fn test_context_handling() {
+    //     let dir = tempdir().unwrap();
+    //     let data_source = JsonDataSource::new(
+    //         "test_org", 
+    //         "test_type", 
+    //         dir.path().to_str().unwrap()
+    //     );
+        
+    //     assert!(data_source.get_context().is_none());
+        
+    //     let mut data_source = data_source;
+    //     data_source.set_context(Some("test_context".to_string()));
+    //     assert_eq!(data_source.get_context(), Some("test_context".to_string()));
+    // }
+
+    // #[test]
+    // fn test_get_data_by_name_with_schema() {
+    //     let dir = tempdir().unwrap();
+    //     let org = "cubtera";
+    //     let dim_type = "dc";
+    //     let name = "test";
+    //     let schema_content = r#"{ "type": "object", "properties": {} }"#;
+
+    //     // Create test directory structure and files
+    //     let dim_path = dir.path().join(org).join(dim_type);
+    //     fs::create_dir_all(&dim_path).unwrap();
+    //     create_test_file(&dim_path, ".schema.json", schema_content);
+
+    //     let data_source = JsonDataSource::new(org, dim_type, dir.path().to_str().unwrap());
+    //     let result = data_source.get_data_by_name(name).unwrap();
+
+    //     assert_eq!(result["name"], name);
+    // }
 }

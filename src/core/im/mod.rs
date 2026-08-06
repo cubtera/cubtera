@@ -227,6 +227,7 @@ pub fn get_all_dim_types(org: &str, storage: &Storage) -> Value {
             let db = client.database(org);
             db.list_collection_names().run().unwrap()
         }
+        // TODO: Implement FS storage for dim types 
         Storage::FS => GLOBAL_CFG.orgs.clone(),
     }
     .iter()
