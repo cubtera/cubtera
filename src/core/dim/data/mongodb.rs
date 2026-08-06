@@ -199,3 +199,38 @@ impl DataSource for MongoDBDataSource {
         self.context.clone()
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use mockall::predicate::*;
+//     use mockall::*;
+// 
+//     mock! {
+//         MongoClient {
+//             fn database(&self, name: &str) -> Database;
+//             fn list_database_names(&self) -> Result<Vec<String>, mongodb::error::Error>;
+//         }
+//     }
+// 
+//     #[test]
+//     fn test_mongodb_datasource_context() {
+//         let mut source = MongoDBDataSource::new("test_org", "test_type");
+//         assert!(source.get_context().is_none());
+//         
+//         source.set_context(Some("test_context".to_string()));
+//         assert_eq!(source.get_context(), Some("test_context".to_string()));
+//     }
+// 
+//     #[test]
+//     fn test_mongodb_datasource_get_data_by_name() {
+//         let source = MongoDBDataSource::new("test_org", "test_type");
+//         let result = source.get_data_by_name("test_name");
+//         
+//         // Without proper mocking, this should return empty json
+//         assert_eq!(result.unwrap(), json!({}));
+//     }
+// 
+//     // Note: More comprehensive MongoDB tests would require proper mocking
+//     // of the MongoDB client and related structures
+// }
