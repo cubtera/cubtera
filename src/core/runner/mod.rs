@@ -1,19 +1,24 @@
 mod bash;
-mod params;
+pub mod params;
 #[allow(clippy::option_map_unit_fn)]
 mod tf;
 mod tofu;
+mod helm;
+
 
 use crate::prelude::*;
+use crate::tools::compat::{LegacyCompat, OptionCompat};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 // add new runner here
-fn runner_create(runner_type: RunnerType, load: RunnerLoad) -> Box<dyn Runner> {
+pub fn runner_create(runner_type: RunnerType, load: RunnerLoad) -> Box<dyn Runner> {
     match runner_type {
         RunnerType::TF => Box::new(tf::TfRunner::new(load)),
         RunnerType::BASH => Box::new(bash::BashRunner::new(load)),
         RunnerType::TOFU => Box::new(tofu::TofuRunner::new(load)),
+        RunnerType::HELM => Box::new(helm::HelmRunner::new(load)),
         _ => exit_with_error(format!(
             "Unknown runner type: {runner_type:?}. Check documentation about supported runners"
         )),
@@ -33,6 +38,7 @@ pub enum RunnerType {
     TF,
     BASH,
     TOFU,
+    HELM,
     UNKNOWN,
 }
 
@@ -42,6 +48,7 @@ impl RunnerType {
             "TF" => RunnerType::TF,
             "BASH" => RunnerType::BASH,
             "TOFU" => RunnerType::TOFU,
+            "HELM" => RunnerType::HELM,
             _ => RunnerType::UNKNOWN,
         }
     }
@@ -101,9 +108,85 @@ pub trait Runner {
         Ok(())
     }
 
-    fn logger(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    /// Logs runner execution data to database or disk
+    /// 
+    /// # Behavior
+    /// - If `GLOBAL_CFG.dlog_db.is_some()`: Saves to configured database
+    /// - If `GLOBAL_CFG.dlog_db.is_none()`: Saves to disk at `~/.cubtera/{org}/{unit}/{dims}/dlog.json`
+    /// 
+    /// # Arguments
+    /// * `exit_code` - The exit code from the command execution
+    /// 
+    /// # Returns
+    /// * `Ok(())` - If logging was successful
+    /// * `Err(Box<dyn std::error::Error>)` - If logging failed
+    fn logger(&mut self, exit_code: i32) -> Result<(), Box<dyn std::error::Error>> {
         debug!(target: "runner", "Default logger method.");
-        self.update_ctx("logger", json!("passed"));
+        
+        // Log to database if configured and dlog_db is available
+        if GLOBAL_CFG.dlog_db.is_some() {
+            use crate::core::dlog::Dlog;
+            
+            // Get command type from the first command argument
+            let command_type = self.get_load().command
+                .first()
+                .map(|s| s.as_str())
+                .unwrap_or("unknown");
+                
+            let dlog = Dlog::build(self.get_load().unit.clone(), command_type.into(), exit_code);
+            let _ = dlog
+                .put(&GLOBAL_CFG.org)
+                .check_with_warn("Can't put dlog to DB");
+            info!(target: "runner", "Dlog data was saved for {} command", command_type);
+        } else {
+            // Save to disk if no dlog_db configuration
+            use crate::core::dlog::Dlog;
+            
+            // Get command type from the first command argument
+            let command_type = self.get_load().command
+                .first()
+                .map(|s| s.as_str())
+                .unwrap_or("unknown");
+            
+            // Build dlog data same as for DB
+            let dlog = Dlog::build(self.get_load().unit.clone(), command_type.into(), exit_code);
+            
+            // Create disk path: ~/.cubtera/ + same path structure as temp_folder
+            let home_dir = std::env::var("HOME")
+                .unwrap_or_else(|_| "/tmp".to_string());
+            
+            // Get relative path from temp_folder (remove temp_folder_path prefix)
+            let temp_folder = &self.get_load().unit.temp_folder;
+            let temp_folder_path = Path::new(&GLOBAL_CFG.temp_folder_path);
+            
+            let relative_path = if let Ok(rel_path) = temp_folder.strip_prefix(temp_folder_path) {
+                rel_path.to_path_buf()
+            } else {
+                // Fallback: construct path manually if strip_prefix fails
+                Path::new(&GLOBAL_CFG.org)
+                    .join(&self.get_load().unit.name)
+                    .join(self.get_load().unit.get_unit_state_path())
+            };
+            
+            // Create dlog file path: ~/.cubtera/{relative_path}/dlog.json
+            let dlog_dir = Path::new(&home_dir)
+                .join(".cubtera")
+                .join(relative_path);
+            
+            let dlog_file_path = dlog_dir.join("dlog.json");
+            
+            // Create directory if it doesn't exist
+            std::fs::create_dir_all(&dlog_dir)?;
+            
+            // Serialize dlog to JSON and save to file
+            let dlog_json = serde_json::to_string_pretty(&dlog)?;
+            std::fs::write(&dlog_file_path, dlog_json)?;
+            
+            info!(target: "runner", "Dlog data was saved to disk: {:?} for {} command", dlog_file_path, command_type);
+        }
+        
+        self.update_ctx("logger", json!("executed"));
+        self.update_ctx("exit_code", json!(exit_code));
         debug!(target: "runner", "Final context: {}", self.get_ctx().to_string());
 
         Ok(())
@@ -115,8 +198,8 @@ pub trait Runner {
         self.inlet()?;
         self.runner()?;
         self.outlet()?;
-        self.logger()?;
-
+        // Note: logger will be called by individual runners with their exit code
+        
         Ok(self.get_ctx().clone())
     }
 
@@ -159,8 +242,15 @@ pub trait Runner {
             env_vars.insert("CUBTERA_RUNNER_CMD".into(), self.get_load().command.join(" "));
 
             let exit_code = execute_command(&command, &dir, env_vars)?;
+            let exit_code_value = exit_code.code().unwrap_or(1);
 
-            self.update_ctx(&format!("{}_exit_code", step), json!(exit_code.code()));
+            self.update_ctx(&format!("{}_exit_code", step), json!(exit_code_value));
+            
+            // Call logger for main runner step
+            if step == "runner" {
+                self.logger(exit_code_value)?;
+            }
+            
             if exit_code.success() {
                 debug!(target: "runner", "{} command executed successfully", capitalize_first(step));
             } else {
@@ -238,7 +328,7 @@ impl RunnerBuilder {
                         json!({
                             "local": {
                                 "path": string_to_path(state.get("path")
-                                    .unwrap_or_exit("Local backend path is not defined right in global config or unit manifest".into())),
+                                    .unwrap_or_else(|| exit_with_error("Local backend path is not defined right in global config or unit manifest".into()))),
                             }
                         })
                     } else { json!({ state_type: state}) }
@@ -303,7 +393,7 @@ impl RunnerBuilder {
     }
 }
 
-fn apply_template_to_value(
+pub fn apply_template_to_value(
     value: &Value,
     handlebars: &handlebars::Handlebars,
     data: &Value,
@@ -332,3 +422,9 @@ fn apply_template_to_value(
         _ => value.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod logger_tests;

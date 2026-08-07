@@ -1,5 +1,7 @@
-mod manifest;
-use manifest::Manifest;
+pub mod manifest;
+
+// Re-export Manifest for use in tests
+pub use manifest::Manifest;
 
 use serde_json::json;
 use serde_json::Value;

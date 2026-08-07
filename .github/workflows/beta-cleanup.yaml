@@ -1,0 +1,217 @@
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      max_beta_releases:
+        description: 'Maximum number of beta releases to keep'
+        required: false
+        default: '10'
+        type: string
+
+permissions:
+  contents: write
+
+name: Cleanup old beta releases
+jobs:
+  cleanup_github_releases:
+    name: Cleanup GitHub beta releases
+    runs-on: ubuntu-latest
+    outputs:
+      deleted_releases: ${{ steps.cleanup.outputs.deleted_releases }}
+    steps:
+      - name: Cleanup old beta releases
+        id: cleanup
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const maxReleases = parseInt('${{ github.event.inputs.max_beta_releases || '10' }}');
+            
+            // Get all releases
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            // Filter beta releases
+            const betaReleases = releases
+              .filter(release => release.prerelease && release.tag_name.includes('-beta.pr'))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            
+            console.log(`Found ${betaReleases.length} beta releases`);
+            
+            if (betaReleases.length <= maxReleases) {
+              console.log(`Keeping all ${betaReleases.length} beta releases (under limit of ${maxReleases})`);
+              core.setOutput('deleted_releases', JSON.stringify([]));
+              return;
+            }
+            
+            // Delete old releases
+            const toDelete = betaReleases.slice(maxReleases);
+            const deletedReleases = [];
+            
+            for (const release of toDelete) {
+              try {
+                console.log(`Deleting release: ${release.tag_name}`);
+                
+                // Delete the release
+                await github.rest.repos.deleteRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id
+                });
+                
+                // Delete the tag
+                try {
+                  await github.rest.git.deleteRef({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    ref: `tags/${release.tag_name}`
+                  });
+                } catch (tagError) {
+                  console.log(`Could not delete tag ${release.tag_name}: ${tagError.message}`);
+                }
+                
+                deletedReleases.push({
+                  tag: release.tag_name,
+                  pr_number: release.tag_name.match(/pr(\d+)/)?.[1]
+                });
+                
+              } catch (error) {
+                console.error(`Failed to delete release ${release.tag_name}: ${error.message}`);
+              }
+            }
+            
+            console.log(`Deleted ${deletedReleases.length} old beta releases`);
+            core.setOutput('deleted_releases', JSON.stringify(deletedReleases));
+
+  cleanup_homebrew:
+    name: Cleanup Homebrew beta formulas
+    runs-on: ubuntu-latest
+    needs: cleanup_github_releases
+    if: ${{ needs.cleanup_github_releases.outputs.deleted_releases != '[]' }}
+    steps:
+      - name: Trigger Homebrew cleanup
+        run: |
+          DELETED_RELEASES='${{ needs.cleanup_github_releases.outputs.deleted_releases }}'
+          
+          cat << EOF > payload.json
+          {
+            "event_type": "cleanup_beta_formulas",
+            "client_payload": {
+              "deleted_releases": $DELETED_RELEASES
+            }
+          }
+          EOF
+          
+          cat payload.json
+          
+          gh api \
+          --method POST \
+          -H "Accept: application/vnd.github.v3+json" \
+          /repos/cubtera/homebrew-cubtera/dispatches \
+          --input payload.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  cleanup_closed_prs:
+    name: Cleanup beta releases for closed PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find and cleanup closed PR betas
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get all beta releases
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            const betaReleases = releases.filter(release => 
+              release.prerelease && release.tag_name.includes('-beta.pr')
+            );
+            
+            const deletedReleases = [];
+            
+            for (const release of betaReleases) {
+              const prMatch = release.tag_name.match(/pr(\d+)/);
+              if (!prMatch) continue;
+              
+              const prNumber = parseInt(prMatch[1]);
+              
+              try {
+                // Check if PR is still open
+                const { data: pr } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber
+                });
+                
+                if (pr.state === 'closed') {
+                  console.log(`PR #${prNumber} is closed, deleting beta release ${release.tag_name}`);
+                  
+                  // Delete the release
+                  await github.rest.repos.deleteRelease({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    release_id: release.id
+                  });
+                  
+                  // Delete the tag
+                  try {
+                    await github.rest.git.deleteRef({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      ref: `tags/${release.tag_name}`
+                    });
+                  } catch (tagError) {
+                    console.log(`Could not delete tag ${release.tag_name}: ${tagError.message}`);
+                  }
+                  
+                  deletedReleases.push({
+                    tag: release.tag_name,
+                    pr_number: prNumber.toString()
+                  });
+                }
+              } catch (error) {
+                if (error.status === 404) {
+                  console.log(`PR #${prNumber} not found, deleting beta release ${release.tag_name}`);
+                  
+                  // Delete the release
+                  await github.rest.repos.deleteRelease({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    release_id: release.id
+                  });
+                  
+                  deletedReleases.push({
+                    tag: release.tag_name,
+                    pr_number: prNumber.toString()
+                  });
+                }
+              }
+            }
+            
+            // Trigger Homebrew cleanup if needed
+            if (deletedReleases.length > 0) {
+              const payload = {
+                event_type: "cleanup_beta_formulas",
+                client_payload: {
+                  deleted_releases: deletedReleases
+                }
+              };
+              
+              await fetch('https://api.github.com/repos/cubtera/homebrew-cubtera/dispatches', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `token ${{ secrets.HOMEBREW_TAP_TOKEN }}`,
+                  'Accept': 'application/vnd.github.v3+json',
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+              });
+            } 

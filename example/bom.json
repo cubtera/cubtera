@@ -1,0 +1,41 @@
+{
+  "_id": "dc:stg1-use2#tf_unit02#service:app#mongodb:users#latest",
+  "hash" : "8850c8683aacf34045c0889610e18852bddb2acf6dee95f9136377e04571b764",
+
+  "hashes": {
+    "unit" : "7a82d5b7651f2c0b2f07c770bf022d2c8bce2a9b",
+    "dims" : "2ab890a68b0f5aeedf3e2673921ee1189c9c3f254ed3e1385a6c2472e715f9c3",
+    "vars" : "ff19802b75c0ec8b2b5332e67e45b98dd512e1094b31cfbe31e7c45dae133ce0"
+  },
+
+  "refs" : {
+    "unit_sha" : "0f8505e726561189bdc117e39bb4d01391b62a87",
+    "dims_sha" : "0f8505e726561189bdc117e39bb4d01391b62a87",
+    "env_vars" : { "PWD": "/Users/denis/Projects/cubtera" }
+  },
+
+  "atom" : {
+    "unit"  : "tf_unit02",
+    "x" : "dc:stg1-use2",
+    "y" : "service:app#mongodb:users",
+    "version": "latest"
+  },
+
+  "unit": {
+    "sha" : "0f8505e726561189bdc117e39bb4d01391b62a87",
+    "hash" : "7a82d5b7651f2c0b2f07c770bf022d2c8bce2a9b"
+  },
+
+  "dims" : {
+    "sha" : "0f8505e726561189bdc117e39bb4d01391b62a87",
+    "hash" : "2ab890a68b0f5aeedf3e2673921ee1189c9c3f254ed3e1385a6c2472e715f9c3"
+  },
+
+  "vars" : {
+    "values" : { "PWD": "/Users/denis/Projects/cubtera" },
+    "hash" : "ff19802b75c0ec8b2b5332e67e45b98dd512e1094b31cfbe31e7c45dae133ce0"
+  },
+
+  "timestamp": 1737063385,
+  "datetime" : "2025-01-16 21:36:25 UTC"
+}

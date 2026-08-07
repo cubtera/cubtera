@@ -1,0 +1,3 @@
+{
+  "test#2": "shouldn't be"
+}

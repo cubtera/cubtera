@@ -8,7 +8,7 @@ type = "bash"
 inlet_command = "ls"
 outlet_command = "sleep 10"
 
-runner_command = "./test.sh"
+runner_command = "bash test.sh"
 extra_args = "extra_args"
 
 version = "1.0.0" # not relevant for bash unit

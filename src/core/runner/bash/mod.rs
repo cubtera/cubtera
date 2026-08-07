@@ -27,3 +27,6 @@ impl Runner for BashRunner {
         &mut self.ctx
     }
 }
+
+#[cfg(test)]
+mod tests;

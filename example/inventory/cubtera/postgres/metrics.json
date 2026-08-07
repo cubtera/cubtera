@@ -1,0 +1,13 @@
+{
+  "owner": "platform_team",
+  "prod": {
+    "instance_class": "db.r5.large",
+    "storage": 500,
+    "backup_retention": 30
+  },
+  "stg": {
+    "instance_class": "db.t3.small",
+    "storage": 50,
+    "backup_retention": 7
+  }
+} 

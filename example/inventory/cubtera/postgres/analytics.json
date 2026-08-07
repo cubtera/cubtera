@@ -1,0 +1,11 @@
+{
+  "owner": "data_team",
+  "prod": {
+    "instance_class": "db.r5.xlarge",
+    "storage": 1000
+  },
+  "stg": {
+    "instance_class": "db.t3.medium", 
+    "storage": 100
+  }
+} 

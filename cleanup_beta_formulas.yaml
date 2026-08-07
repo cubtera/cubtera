@@ -1,0 +1,178 @@
+name: Cleanup Beta Formulas
+
+on:
+  repository_dispatch:
+    types: [cleanup_beta_formulas]
+
+jobs:
+  cleanup-beta-formulas:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout homebrew-cubtera
+      uses: actions/checkout@v4
+
+    - name: Cleanup beta formulas
+      run: |
+        DELETED_RELEASES='${{ github.event.client_payload.deleted_releases }}'
+        echo "Processing deleted releases: $DELETED_RELEASES"
+        
+        # Parse JSON and extract PR numbers
+        PR_NUMBERS=$(echo "$DELETED_RELEASES" | jq -r '.[].pr_number' | tr '\n' ' ')
+        echo "PR numbers to cleanup: $PR_NUMBERS"
+        
+        CHANGES_MADE=false
+        REMOVED_FORMULAS=""
+        
+        for PR_NUMBER in $PR_NUMBERS; do
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            echo "Processing cleanup for PR #$PR_NUMBER"
+            
+            # Remove specific PR formula
+            PR_FORMULA="./Formula/cubtera-beta@pr${PR_NUMBER}.rb"
+            if [ -f "$PR_FORMULA" ]; then
+              echo "Removing specific formula: $PR_FORMULA"
+              rm -f "$PR_FORMULA"
+              CHANGES_MADE=true
+              REMOVED_FORMULAS="$REMOVED_FORMULAS cubtera-beta@pr${PR_NUMBER}"
+            fi
+            
+            # Check if this was the active beta formula (latest)
+            if [ -f "./Formula/cubtera-beta.rb" ]; then
+              CURRENT_PR=$(grep -o 'pr[0-9]\+' ./Formula/cubtera-beta.rb | head -1 | sed 's/pr//')
+              
+              if [ "$CURRENT_PR" = "$PR_NUMBER" ]; then
+                echo "Current latest beta was from closed PR #$PR_NUMBER"
+                
+                # Find the next most recent active beta
+                NEXT_BETA=""
+                for remaining_formula in ./Formula/cubtera-beta@pr*.rb; do
+                  if [ -f "$remaining_formula" ]; then
+                    REMAINING_PR=$(echo "$remaining_formula" | grep -o 'pr[0-9]\+' | sed 's/pr//')
+                    if [ "$REMAINING_PR" != "$PR_NUMBER" ]; then
+                      NEXT_BETA="$remaining_formula"
+                      break
+                    fi
+                  fi
+                done
+                
+                if [ -n "$NEXT_BETA" ]; then
+                  echo "Updating main beta formula to point to: $NEXT_BETA"
+                  # Copy the next beta formula as the main one
+                  cp "$NEXT_BETA" "./Formula/cubtera-beta.rb"
+                  # Update class name back to CubteraBeta
+                  sed -i 's/class CubteraBetaAtPr[0-9]\+/class CubteraBeta/' "./Formula/cubtera-beta.rb"
+                  CHANGES_MADE=true
+                else
+                  echo "No remaining beta formulas, removing main beta formula"
+                  rm -f "./Formula/cubtera-beta.rb"
+                  echo "# No active beta releases" > ./Formula/.cubtera-beta-placeholder
+                  CHANGES_MADE=true
+                fi
+              fi
+            fi
+          fi
+        done
+        
+        # Update BETA_VERSIONS.md
+        if [ "$CHANGES_MADE" = true ]; then
+          echo "Updating BETA_VERSIONS.md"
+          echo "# Available Beta Versions" > BETA_VERSIONS.md
+          echo "" >> BETA_VERSIONS.md
+          
+          if [ -f "./Formula/cubtera-beta.rb" ]; then
+            CURRENT_PR=$(grep -o 'pr[0-9]\+' ./Formula/cubtera-beta.rb | head -1 | sed 's/pr//')
+            CURRENT_VERSION=$(grep 'version' ./Formula/cubtera-beta.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            echo "## Current Beta (Latest)" >> BETA_VERSIONS.md
+            echo "- **cubtera-beta**: PR #$CURRENT_PR - $CURRENT_VERSION" >> BETA_VERSIONS.md
+            echo "" >> BETA_VERSIONS.md
+          fi
+          
+          echo "## All Beta Versions" >> BETA_VERSIONS.md
+          
+          # List remaining beta formulas
+          FOUND_FORMULAS=false
+          for formula in ./Formula/cubtera-beta@pr*.rb; do
+            if [ -f "$formula" ]; then
+              FORMULA_NAME=$(basename "$formula" .rb)
+              FORMULA_PR=$(echo "$FORMULA_NAME" | grep -o 'pr[0-9]\+' | sed 's/pr//')
+              FORMULA_VERSION=$(grep 'version' "$formula" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+              echo "- **$FORMULA_NAME**: PR #$FORMULA_PR - $FORMULA_VERSION" >> BETA_VERSIONS.md
+              FOUND_FORMULAS=true
+            fi
+          done
+          
+          if [ "$FOUND_FORMULAS" = false ]; then
+            echo "No beta versions available." >> BETA_VERSIONS.md
+          fi
+          
+          echo "" >> BETA_VERSIONS.md
+          echo "## Installation" >> BETA_VERSIONS.md
+          echo "\`\`\`bash" >> BETA_VERSIONS.md
+          if [ -f "./Formula/cubtera-beta.rb" ]; then
+            echo "# Install latest beta" >> BETA_VERSIONS.md
+            echo "brew install cubtera/cubtera/cubtera-beta" >> BETA_VERSIONS.md
+            echo "" >> BETA_VERSIONS.md
+          fi
+          echo "# Install specific PR beta" >> BETA_VERSIONS.md
+          echo "brew install cubtera/cubtera/cubtera-beta@pr<PR_NUMBER>" >> BETA_VERSIONS.md
+          echo "\`\`\`" >> BETA_VERSIONS.md
+        fi
+        
+        # Commit changes if any were made
+        if [ "$CHANGES_MADE" = true ]; then
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -A
+          git commit -m "Cleanup beta formulas for closed PRs: $PR_NUMBERS (removed:$REMOVED_FORMULAS)" || echo "No changes to commit"
+          git push
+        else
+          echo "No beta formulas to cleanup"
+        fi
+
+  check-active-betas:
+    runs-on: ubuntu-latest
+    needs: cleanup-beta-formulas
+    steps:
+    - name: Checkout homebrew-cubtera
+      uses: actions/checkout@v4
+      with:
+        ref: main  # Ensure we have the latest changes
+
+    - name: Check for remaining active betas
+      run: |
+        echo "Checking for remaining active beta releases..."
+        
+        # Get list of current beta releases from main repo
+        ACTIVE_BETAS=$(curl -s https://api.github.com/repos/cubtera/cubtera/releases | jq -r '.[] | select(.prerelease and (.tag_name | contains("-beta.pr"))) | .tag_name')
+        
+        echo "Active beta releases:"
+        echo "$ACTIVE_BETAS"
+        
+        # Count local formulas vs remote releases
+        LOCAL_FORMULAS=$(ls ./Formula/cubtera-beta@pr*.rb 2>/dev/null | wc -l)
+        REMOTE_RELEASES=$(echo "$ACTIVE_BETAS" | grep -c "beta.pr" || echo "0")
+        
+        echo "Local beta formulas: $LOCAL_FORMULAS"
+        echo "Remote beta releases: $REMOTE_RELEASES"
+        
+        if [ "$LOCAL_FORMULAS" -gt "$REMOTE_RELEASES" ]; then
+          echo "Warning: More local formulas than remote releases - cleanup may be needed"
+        fi
+        
+        if [ "$REMOTE_RELEASES" -eq 0 ]; then
+          echo "No active beta releases found"
+          
+          # Remove all beta formulas if no active betas
+          if [ -f "./Formula/cubtera-beta.rb" ] || [ "$LOCAL_FORMULAS" -gt 0 ]; then
+            echo "Removing all beta formulas as no active betas exist"
+            rm -f ./Formula/cubtera-beta*.rb
+            echo "# No active beta releases" > ./Formula/.cubtera-beta-placeholder
+            echo "No beta versions available." > BETA_VERSIONS.md
+            
+            git config user.name github-actions
+            git config user.email github-actions@github.com
+            git add -A
+            git commit -m "Remove all beta formulas - no active beta releases" || echo "No changes to commit"
+            git push
+          fi
+        fi 

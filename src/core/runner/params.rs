@@ -1,8 +1,9 @@
 use crate::prelude::*;
+use crate::tools::compat::LegacyCompat; // Add safe error handling
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunnerParams {
     #[serde(default = "default_version")]
     pub version: String,
@@ -18,6 +19,20 @@ pub struct RunnerParams {
     pub outlet_command: Option<String>,
     #[serde(default = "default_lock_port")]
     pub lock_port: String,
+}
+
+impl Default for RunnerParams {
+    fn default() -> Self {
+        Self {
+            version: default_version(),
+            state_backend: default_state_backend(),
+            runner_command: None,
+            extra_args: None,
+            inlet_command: None,
+            outlet_command: None,
+            lock_port: default_lock_port(),
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -47,14 +62,17 @@ impl RunnerParams {
     }
 }
 
-fn default_lock_port() -> String {
+pub fn default_lock_port() -> String {
     String::from("65432")
 }
 
-fn default_version() -> String {
+pub fn default_version() -> String {
     String::from("latest")
 }
 
-fn default_state_backend() -> String {
+pub fn default_state_backend() -> String {
     String::from("local")
 }
+
+#[cfg(test)]
+mod tests;

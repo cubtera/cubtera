@@ -1,0 +1,19 @@
+# Build Stage
+FROM rust:latest AS builder
+WORKDIR /usr/src/
+RUN rustup target add x86_64-unknown-linux-musl
+RUN apt update && apt install pkg-config musl-tools libssl-dev
+
+USER root
+WORKDIR /usr/src/cubtera
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+RUN cargo install --target x86_64-unknown-linux-musl --path .
+
+# Bundle Stage
+FROM scratch
+COPY --from=builder /usr/local/cargo/bin/cubtera .
+EXPOSE 8000
+USER 1000
+CMD ["./cubtera"]

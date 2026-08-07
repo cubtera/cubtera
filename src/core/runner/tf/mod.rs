@@ -239,22 +239,8 @@ impl Runner for TfRunner {
 
         let exit_code = result.code().unwrap_or(1);
 
-        let tf_command = GLOBAL_CFG.dlog_db.clone().and(
-            matches!(self.load.command.as_slice(), [cmd, ..] if cmd == "apply")
-                .then_some("apply")
-                .or(
-                    matches!(self.load.command.as_slice(), [cmd, ..] if cmd == "destroy")
-                        .then_some("destroy"),
-                ),
-        );
-
-        if let Some(tf_command) = tf_command {
-            let dlog = Dlog::build(self.load.unit.clone(), tf_command.into(), exit_code);
-            let _ = dlog
-                .put(&GLOBAL_CFG.org)
-                .check_with_warn("Can't put dlog to DB");
-            info!(target: "tf runner", "Dlog data was saved");
-        }
+        // Use the common logger method from Runner trait
+        self.logger(exit_code)?;
 
         if socket.is_some() {
             debug!(target: "tf runner", "Unlocking parallel run after finishing init command");
@@ -263,8 +249,6 @@ impl Runner for TfRunner {
 
         if !GLOBAL_CFG.clean_cache {
             debug!(target: "tf runner", "Ignore cache cleaning due to global config");
-            self.update_ctx("exit_code", json!(exit_code));
-
             return Ok(());
         }
 
@@ -281,8 +265,102 @@ impl Runner for TfRunner {
                 }
             }
         }
+        Ok(())
+    }
 
+    /// TF-specific logger method that can be customized for Terraform operations
+    /// 
+    /// # Behavior
+    /// - If `GLOBAL_CFG.dlog_db.is_some()`: Saves to configured database
+    /// - If `GLOBAL_CFG.dlog_db.is_none()`: Saves to disk at `~/.cubtera/{org}/{unit}/{dims}/dlog.json`
+    /// - Can be overridden for TF-specific logging features like state information
+    /// 
+    /// # Arguments
+    /// * `exit_code` - The exit code from the Terraform command execution
+    /// 
+    /// # Returns
+    /// * `Ok(())` - If logging was successful
+    /// * `Err(Box<dyn std::error::Error>)` - If logging failed
+    // TF runner can override logger method for custom logging logic
+    // Currently uses default implementation but can be customized if needed
+    fn logger(&mut self, exit_code: i32) -> Result<(), Box<dyn std::error::Error>> {
+        debug!(target: "tf runner", "TF-specific logger method (can be customized)");
+        
+        // For now, use the default implementation
+        // This can be overridden with TF-specific logging if needed:
+        // - Special database fields for TF operations
+        // - TF-specific log formats  
+        // - Additional TF state information
+        
+        // Call the default logger implementation
+        self.update_ctx("logger", json!("tf_runner_executed"));
+        
+        // Log to database if configured and dlog_db is available
+        if GLOBAL_CFG.dlog_db.is_some() {
+            use crate::core::dlog::Dlog;
+            
+            // TF runner can have special command type handling
+            let command_type = self.get_load().command
+                .first()
+                .map(|s| s.as_str())
+                .unwrap_or("unknown");
+                
+            let dlog = Dlog::build(self.get_load().unit.clone(), command_type.into(), exit_code);
+            let _ = dlog
+                .put(&GLOBAL_CFG.org)
+                .check_with_warn("Can't put dlog to DB");
+            info!(target: "tf runner", "TF Dlog data was saved for {} command", command_type);
+        } else {
+            // Save to disk if no dlog_db configuration
+            use crate::core::dlog::Dlog;
+            use std::path::Path;
+            
+            // Get command type from the first command argument
+            let command_type = self.get_load().command
+                .first()
+                .map(|s| s.as_str())
+                .unwrap_or("unknown");
+            
+            // Build dlog data same as for DB
+            let dlog = Dlog::build(self.get_load().unit.clone(), command_type.into(), exit_code);
+            
+            // Create disk path: ~/.cubtera/ + same path structure as temp_folder
+            let home_dir = std::env::var("HOME")
+                .unwrap_or_else(|_| "/tmp".to_string());
+            
+            // Get relative path from temp_folder (remove temp_folder_path prefix)
+            let temp_folder = &self.get_load().unit.temp_folder;
+            let temp_folder_path = Path::new(&GLOBAL_CFG.temp_folder_path);
+            
+            let relative_path = if let Ok(rel_path) = temp_folder.strip_prefix(temp_folder_path) {
+                rel_path.to_path_buf()
+            } else {
+                // Fallback: construct path manually if strip_prefix fails
+                Path::new(&GLOBAL_CFG.org)
+                    .join(&self.get_load().unit.name)
+                    .join(self.get_load().unit.get_unit_state_path())
+            };
+            
+            // Create dlog file path: ~/.cubtera/{relative_path}/dlog.json
+            let dlog_dir = Path::new(&home_dir)
+                .join(".cubtera")
+                .join(relative_path);
+            
+            let dlog_file_path = dlog_dir.join("dlog.json");
+            
+            // Create directory if it doesn't exist
+            std::fs::create_dir_all(&dlog_dir)?;
+            
+            // Serialize dlog to JSON and save to file
+            let dlog_json = serde_json::to_string_pretty(&dlog)?;
+            std::fs::write(&dlog_file_path, dlog_json)?;
+            
+            info!(target: "tf runner", "TF Dlog data was saved to disk: {:?} for {} command", dlog_file_path, command_type);
+        }
+        
         self.update_ctx("exit_code", json!(exit_code));
+        debug!(target: "tf runner", "TF Final context: {}", self.get_ctx().to_string());
+
         Ok(())
     }
 }
@@ -445,3 +523,6 @@ fn convert_json_to_hcl_file(json: &Value, output_file: PathBuf) -> std::io::Resu
     std::fs::write(output_file, hcl_content.as_bytes())?;
     Ok(())
 }
+
+#[cfg(test)]
+mod logger_tests;

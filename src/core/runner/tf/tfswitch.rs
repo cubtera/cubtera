@@ -1,6 +1,7 @@
 use std::net::TcpListener;
 use std::ops::{Add, Not, Rem};
 use crate::utils::helper::*;
+use crate::tools::compat::{LegacyCompat, OptionCompat};
 
 use rand::Rng;
 use std::path::{Path, PathBuf};
@@ -8,13 +9,14 @@ use log::{debug, info};
 
 pub fn tf_switch(tf_version: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let version = match tf_version {
-        "latest" => get_latest(),
-        _ => tf_version.into(),
+        "latest" => get_latest()?,
+        _ => tf_version.to_string(),
     };
 
-    let _ = semver::Version::parse(&version).unwrap_or_exit(format!(
-        "Failed to parse tf version {version}. Use semver format.",
-    ));
+    let _ = LegacyCompat::with_context(
+        semver::Version::parse(&version),
+        &format!("Failed to parse tf version {version}. Use semver format.")
+    )?;
 
     let path = format!("~/.cubtera/tf/{version}").replace('~', &std::env::var("HOME").unwrap());
 
@@ -90,8 +92,9 @@ fn download_tf(tf_folder: &PathBuf, version: &str) -> Result<(), Box<dyn std::er
 
     debug!(target: "", "Downloading TF zip archive: {}", url);
 
-    let response =
-        reqwest::blocking::get(url).unwrap_or_exit("Error downloading TF zip file".into());
+    let response = LegacyCompat::with_context(
+        reqwest::blocking::get(url),
+        "Error downloading TF zip file")?;
 
     if !response.status().is_success() {
 
@@ -104,42 +107,46 @@ fn download_tf(tf_folder: &PathBuf, version: &str) -> Result<(), Box<dyn std::er
         ));
     }
 
-    let body = response.bytes().unwrap_or_else(|_| {
-        exit_with_error("Error downloading TF zip file".to_string());
-    });
+    let body = LegacyCompat::with_context(
+        response.bytes(),
+        "Error downloading TF zip file")?;
 
-    std::fs::write(tf_folder.join("tmp.zip"), body).unwrap_or_else(|_| {
-        exit_with_error("Unable to save TF zip file".to_string());
-    });
+    LegacyCompat::with_context(
+        std::fs::write(tf_folder.join("tmp.zip"), body),
+        "Unable to save TF zip file")?;
 
     debug!(target: "", "Unzipping TF from {}", tf_folder.join("tmp.zip").display());
 
     // Open the downloaded zip file
-    let zip_file = std::fs::File::open(tf_folder.join("tmp.zip"))
-        .unwrap_or_exit("Failed to open TF zip file".to_string());
+    let zip_file = LegacyCompat::with_context(
+        std::fs::File::open(tf_folder.join("tmp.zip")),
+        "Failed to open TF zip file")?;
 
-    let mut archive = zip::read::ZipArchive::new(zip_file)
-        .unwrap_or_exit("Failed to read TF zip file".to_string());
+    let mut archive = LegacyCompat::with_context(
+        zip::read::ZipArchive::new(zip_file),
+        "Failed to read TF zip file")?;
 
     archive.extract(tf_folder.clone())?;
 
-    std::fs::remove_file(tf_folder.join("tmp.zip"))
-        .unwrap_or_exit("Failed to remove TF zip file".to_string());
+    LegacyCompat::with_context(
+        std::fs::remove_file(tf_folder.join("tmp.zip")),
+        "Failed to remove TF zip file")?;
 
     Ok(())
 }
 
-fn get_latest() -> String {
-    let resp =
-        reqwest::blocking::get("https://api.releases.hashicorp.com/v1/releases/terraform/latest")
-            .unwrap_or_exit("Can't define TF latest version".into())
-            .json::<serde_json::Value>()
-            .unwrap_or_exit("Can't parse TF version response".into());
+fn get_latest() -> Result<String, Box<dyn std::error::Error>> {
+    let resp = LegacyCompat::with_context(
+        LegacyCompat::with_context(
+            reqwest::blocking::get("https://api.releases.hashicorp.com/v1/releases/terraform/latest"),
+            "Can't define TF latest version")?
+            .json::<serde_json::Value>(),
+        "Can't parse TF version response")?;
 
-    resp["version"]
-        .as_str()
-        .unwrap_or_exit("Can't parse TF version response".into())
-        .to_string()
+    Ok(OptionCompat::ok_or_context(
+        resp["version"].as_str(),
+        "Can't parse TF version response")?
+        .to_string())
 }
 
 fn get_os() -> String {

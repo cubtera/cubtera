@@ -1,7 +1,6 @@
 [package]
 name = "cubtera"
 version = "1.0.15"
-
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Cubtera", "denzalman"]
@@ -16,6 +15,7 @@ exclude = [
     "_cli/**",
     "main.rs",
 ]
+resolver = "2"
 
 [lib]
 name = "cubtera"

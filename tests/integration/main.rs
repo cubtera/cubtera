@@ -1,0 +1,3 @@
+mod runner_integration_tests;
+mod inventory_integration_tests;
+mod dimension_integration_tests; 

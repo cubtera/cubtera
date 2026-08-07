@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use super::DataSource;
+use super::{DataSource, DataSourceConfig};
 use crate::prelude::*;
 use mongodb::bson::{doc, Bson};
 use mongodb::sync::Client;
@@ -12,6 +12,7 @@ pub struct MongoDBDataSource {
     client: Client,
     db_name: String,  // org
     col_name: String, // dim_type
+    config: DataSourceConfig, // Configuration for database operations
 
     col: Collection<Bson>,
     db: Database,
@@ -20,8 +21,15 @@ pub struct MongoDBDataSource {
 }
 
 impl MongoDBDataSource {
+    /// Legacy constructor using GLOBAL_CFG (for backward compatibility)
     pub fn new(org: &str, dim_type: &str) -> Self {
-        match GLOBAL_CFG.db_client.as_ref() {
+        let config = DataSourceConfig::from_global();
+        Self::new_with_config(org, dim_type, &config)
+    }
+    
+    /// New constructor with explicit configuration
+    pub fn new_with_config(org: &str, dim_type: &str, config: &DataSourceConfig) -> Self {
+        match config.db_client.as_ref() {
             Some(client) => {
                 let db_name = org.to_string();
                 let col_name = dim_type.to_string();
@@ -33,6 +41,7 @@ impl MongoDBDataSource {
                     db,
                     db_name,
                     col_name,
+                    config: config.clone(),
                     context: None,
                 }
             }
@@ -166,14 +175,14 @@ impl DataSource for MongoDBDataSource {
     }
 
     fn delete_all_by_context(&self, context: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let db_names = &GLOBAL_CFG
+        let db_names = &self.config
             .db_client
             .as_ref()
             .unwrap()
             .list_database_names().run()?;
         db_names.iter()
             .for_each(|name| {
-                let db = GLOBAL_CFG.db_client.as_ref().unwrap().database(name);
+                let db = self.config.db_client.as_ref().unwrap().database(name);
                 db.list_collection_names().run().unwrap()
                     .iter()
                     .for_each(|col| {
