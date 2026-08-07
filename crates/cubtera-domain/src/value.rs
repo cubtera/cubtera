@@ -138,6 +138,62 @@ impl From<HashMap<String, Value>> for Value {
     }
 }
 
+// Conversion to serde_json::Value
+impl From<Value> for serde_json::Value {
+    fn from(v: Value) -> Self {
+        match v {
+            Value::Null => serde_json::Value::Null,
+            Value::Bool(b) => serde_json::Value::Bool(b),
+            Value::Number(n) => serde_json::json!(n),
+            Value::String(s) => serde_json::Value::String(s),
+            Value::Array(arr) => {
+                serde_json::Value::Array(arr.into_iter().map(Into::into).collect())
+            }
+            Value::Object(map) => {
+                let obj: serde_json::Map<String, serde_json::Value> = map
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into()))
+                    .collect();
+                serde_json::Value::Object(obj)
+            }
+        }
+    }
+}
+
+// Conversion from serde_json::Value
+impl From<serde_json::Value> for Value {
+    fn from(v: serde_json::Value) -> Self {
+        match v {
+            serde_json::Value::Null => Value::Null,
+            serde_json::Value::Bool(b) => Value::Bool(b),
+            serde_json::Value::Number(n) => Value::Number(n.as_f64().unwrap_or(0.0)),
+            serde_json::Value::String(s) => Value::String(s),
+            serde_json::Value::Array(arr) => {
+                Value::Array(arr.into_iter().map(Into::into).collect())
+            }
+            serde_json::Value::Object(map) => {
+                let obj: HashMap<String, Value> = map
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into()))
+                    .collect();
+                Value::Object(obj)
+            }
+        }
+    }
+}
+
+/// Convert a HashMap<String, Value> to serde_json::Value
+impl Value {
+    /// Convert HashMap<String, Value> to serde_json::Value
+    pub fn hashmap_to_json(map: &HashMap<String, Value>) -> serde_json::Value {
+        let obj: serde_json::Map<String, serde_json::Value> = map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone().into()))
+            .collect();
+        serde_json::Value::Object(obj)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

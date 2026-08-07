@@ -2,8 +2,11 @@
 //!
 //! The App struct wires all dependencies together.
 
-use crate::ports::{DeploymentLogRepository, DimensionRepository, RunnerFactory, UnitRepository};
+use crate::ports::{
+    CopyConfig, DeploymentLogRepository, DimensionRepository, RunnerFactory, UnitRepository,
+};
 use crate::services::{DimensionService, RunnerService, UnitService};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Application instance with all services wired
@@ -22,11 +25,12 @@ impl App {
         dimension_repository: Arc<dyn DimensionRepository>,
         unit_repository: Arc<dyn UnitRepository>,
         runner_factory: Arc<dyn RunnerFactory>,
+        copy_config: CopyConfig,
         deployment_log: Option<Arc<dyn DeploymentLogRepository>>,
     ) -> Self {
         let dimensions = DimensionService::new(dimension_repository.clone());
         let units = UnitService::new(unit_repository, dimension_repository);
-        let mut runners = RunnerService::new(runner_factory);
+        let mut runners = RunnerService::new(runner_factory, copy_config);
 
         if let Some(log) = deployment_log {
             runners = runners.with_deployment_log(log);
@@ -46,6 +50,7 @@ pub struct AppBuilder {
     unit_repository: Option<Arc<dyn UnitRepository>>,
     runner_factory: Option<Arc<dyn RunnerFactory>>,
     deployment_log: Option<Arc<dyn DeploymentLogRepository>>,
+    copy_config: Option<CopyConfig>,
 }
 
 impl AppBuilder {
@@ -56,6 +61,7 @@ impl AppBuilder {
             unit_repository: None,
             runner_factory: None,
             deployment_log: None,
+            copy_config: None,
         }
     }
 
@@ -83,6 +89,12 @@ impl AppBuilder {
         self
     }
 
+    /// Set copy config
+    pub fn copy_config(mut self, config: CopyConfig) -> Self {
+        self.copy_config = Some(config);
+        self
+    }
+
     /// Build the App
     pub fn build(self) -> Result<App, &'static str> {
         let dimension_repository = self
@@ -91,10 +103,19 @@ impl AppBuilder {
         let unit_repository = self.unit_repository.ok_or("unit_repository is required")?;
         let runner_factory = self.runner_factory.ok_or("runner_factory is required")?;
 
+        // Use default copy_config if not provided
+        let copy_config = self.copy_config.unwrap_or_else(|| CopyConfig {
+            modules_path: PathBuf::from("modules"),
+            plugins_path: PathBuf::from("plugins"),
+            always_copy_files: false,
+            clean_cache: false,
+        });
+
         Ok(App::new(
             dimension_repository,
             unit_repository,
             runner_factory,
+            copy_config,
             self.deployment_log,
         ))
     }
@@ -105,4 +126,3 @@ impl Default for AppBuilder {
         Self::new()
     }
 }
-

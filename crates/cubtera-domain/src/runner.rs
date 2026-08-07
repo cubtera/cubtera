@@ -2,6 +2,8 @@
 //!
 //! Types for representing runner execution parameters and results.
 
+use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Parameters for runner execution
@@ -23,8 +25,14 @@ pub struct RunParams {
     pub extra_args: Option<String>,
     /// State backend type (e.g., "s3", "local")
     pub state_backend: Option<String>,
+    /// Rendered state backend configuration (JSON for backend HCL generation)
+    pub state_backend_config: Option<Value>,
     /// Lock port for parallel execution control
     pub lock_port: u16,
+    /// Inlet (pre-runner) command
+    pub inlet_command: Option<String>,
+    /// Outlet (post-runner) command
+    pub outlet_command: Option<String>,
 }
 
 impl Default for RunParams {
@@ -38,7 +46,10 @@ impl Default for RunParams {
             runner_command: None,
             extra_args: None,
             state_backend: None,
+            state_backend_config: None,
             lock_port: 65432,
+            inlet_command: None,
+            outlet_command: None,
         }
     }
 }
@@ -105,45 +116,90 @@ impl RunParams {
         self.lock_port = port;
         self
     }
+
+    /// Set inlet command
+    pub fn with_inlet_command(mut self, cmd: impl Into<String>) -> Self {
+        self.inlet_command = Some(cmd.into());
+        self
+    }
+
+    /// Set outlet command
+    pub fn with_outlet_command(mut self, cmd: impl Into<String>) -> Self {
+        self.outlet_command = Some(cmd.into());
+        self
+    }
+
+    /// Set state backend config (rendered JSON)
+    pub fn with_state_backend_config(mut self, config: Value) -> Self {
+        self.state_backend_config = Some(config);
+        self
+    }
 }
 
 /// Result of a runner execution
 #[derive(Debug, Clone)]
 pub struct RunResult {
-    /// Exit code (0 = success)
-    pub exit_code: i32,
-    /// Standard output
-    pub stdout: String,
-    /// Standard error
-    pub stderr: String,
-    /// Duration in milliseconds
-    pub duration_ms: u64,
+    /// Whether execution was successful
+    pub success: bool,
+    /// Exit code (None if not applicable)
+    pub exit_code: Option<i32>,
+    /// Standard output (if captured)
+    pub output: Option<String>,
+    /// Metadata collected during pipeline
+    pub metadata: HashMap<String, Value>,
+}
+
+impl Default for RunResult {
+    fn default() -> Self {
+        Self {
+            success: false,
+            exit_code: None,
+            output: None,
+            metadata: HashMap::new(),
+        }
+    }
 }
 
 impl RunResult {
     /// Check if execution was successful
     pub fn is_success(&self) -> bool {
-        self.exit_code == 0
+        self.success
     }
 
     /// Create a successful result
-    pub fn success(stdout: String, duration_ms: u64) -> Self {
+    pub fn success_result() -> Self {
         Self {
-            exit_code: 0,
-            stdout,
-            stderr: String::new(),
-            duration_ms,
+            success: true,
+            exit_code: Some(0),
+            output: None,
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Create a successful result with exit code
+    pub fn with_exit_code(exit_code: i32) -> Self {
+        Self {
+            success: exit_code == 0,
+            exit_code: Some(exit_code),
+            output: None,
+            metadata: HashMap::new(),
         }
     }
 
     /// Create a failed result
-    pub fn failure(exit_code: i32, stderr: String, duration_ms: u64) -> Self {
+    pub fn failure(exit_code: i32) -> Self {
         Self {
-            exit_code,
-            stdout: String::new(),
-            stderr,
-            duration_ms,
+            success: false,
+            exit_code: Some(exit_code),
+            output: None,
+            metadata: HashMap::new(),
         }
+    }
+
+    /// Add metadata
+    pub fn with_metadata(mut self, key: impl Into<String>, value: Value) -> Self {
+        self.metadata.insert(key.into(), value);
+        self
     }
 }
 
@@ -210,26 +266,48 @@ mod tests {
             .with_command("plan")
             .with_env("TF_VAR_env", "prod")
             .with_auto_approve(true)
-            .with_version("1.6.6");
+            .with_version("1.6.6")
+            .with_inlet_command("echo inlet")
+            .with_outlet_command("echo outlet");
 
         assert_eq!(params.work_dir, PathBuf::from("/tmp/work"));
         assert_eq!(params.command, vec!["plan"]);
         assert!(params.auto_approve);
         assert_eq!(params.version, Some("1.6.6".to_string()));
+        assert_eq!(params.inlet_command, Some("echo inlet".to_string()));
+        assert_eq!(params.outlet_command, Some("echo outlet".to_string()));
     }
 
     #[test]
     fn test_run_result_success() {
-        let result = RunResult::success("output".to_string(), 100);
+        let result = RunResult::success_result();
         assert!(result.is_success());
-        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.exit_code, Some(0));
     }
 
     #[test]
     fn test_run_result_failure() {
-        let result = RunResult::failure(1, "error".to_string(), 50);
+        let result = RunResult::failure(1);
         assert!(!result.is_success());
-        assert_eq!(result.exit_code, 1);
+        assert_eq!(result.exit_code, Some(1));
+    }
+
+    #[test]
+    fn test_run_result_with_exit_code() {
+        let success = RunResult::with_exit_code(0);
+        assert!(success.is_success());
+
+        let failure = RunResult::with_exit_code(1);
+        assert!(!failure.is_success());
+    }
+
+    #[test]
+    fn test_run_result_metadata() {
+        let result = RunResult::success_result()
+            .with_metadata("key", serde_json::json!("value"));
+        
+        assert!(result.metadata.contains_key("key"));
+        assert_eq!(result.metadata.get("key").unwrap(), &serde_json::json!("value"));
     }
 
     #[test]

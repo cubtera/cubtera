@@ -4,7 +4,7 @@
 
 use crate::error::AppResult;
 use async_trait::async_trait;
-use cubtera_domain::{Dimension, DimType, Manifest, Unit, Value};
+use cubtera_domain::{Dimension, DimType, Manifest};
 
 /// Repository for dimension data
 #[async_trait]

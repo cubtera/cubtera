@@ -3,8 +3,9 @@ name = "cubtera-domain"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Cubtera domain layer - pure business logic with zero dependencies"
+description = "Cubtera domain layer - business logic entities and value objects"
 
 [dependencies]
-# Zero external dependencies - only std
+# Minimal dependencies for domain types
+serde_json.workspace = true
 

@@ -71,9 +71,21 @@ pub struct Config {
     #[serde(default = "default_plugins_path")]
     pub plugins_path: PathBuf,
 
+    /// Path to temp folder for runner execution
+    #[serde(default = "default_temp_folder_path")]
+    pub temp_folder_path: PathBuf,
+
     /// Dimension relations (hierarchy)
     #[serde(default = "default_dim_relations")]
     pub dim_relations: Vec<String>,
+
+    /// Always copy files before run (not just on init)
+    #[serde(default)]
+    pub always_copy_files: bool,
+
+    /// Clean temp cache after successful apply/destroy
+    #[serde(default)]
+    pub clean_cache: bool,
 
     /// Runner configuration
     #[serde(default)]
@@ -104,6 +116,12 @@ fn default_plugins_path() -> PathBuf {
     PathBuf::from("plugins")
 }
 
+fn default_temp_folder_path() -> PathBuf {
+    dirs::home_dir()
+        .map(|h| h.join(".cubtera").join("temp"))
+        .unwrap_or_else(|| PathBuf::from("/tmp/cubtera"))
+}
+
 fn default_dim_relations() -> Vec<String> {
     vec!["dome".to_string(), "env".to_string(), "dc".to_string()]
 }
@@ -120,7 +138,10 @@ impl Default for Config {
             units_path: default_units_path(),
             modules_path: default_modules_path(),
             plugins_path: default_plugins_path(),
+            temp_folder_path: default_temp_folder_path(),
             dim_relations: default_dim_relations(),
+            always_copy_files: false,
+            clean_cache: false,
             runner: RunnerConfig::default(),
             state: HashMap::new(),
             deployment_log: None,
@@ -187,6 +208,18 @@ impl Config {
         if let Ok(modules_path) = env::var("CUBTERA_MODULES_PATH") {
             self.modules_path = PathBuf::from(modules_path);
         }
+
+        if let Ok(temp_path) = env::var("CUBTERA_TEMP_PATH") {
+            self.temp_folder_path = PathBuf::from(temp_path);
+        }
+
+        if env::var("CUBTERA_ALWAYS_COPY_FILES").is_ok() {
+            self.always_copy_files = true;
+        }
+
+        if env::var("CUBTERA_CLEAN_CACHE").is_ok() {
+            self.clean_cache = true;
+        }
     }
 
     /// Get the inventory path (for FS storage)
@@ -212,9 +245,9 @@ pub struct RunnerConfig {
 /// State backend configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StateBackendConfig {
-    /// Backend-specific options
+    /// Backend-specific options (supports handlebars templates)
     #[serde(flatten)]
-    pub options: HashMap<String, String>,
+    pub options: HashMap<String, serde_json::Value>,
 }
 
 /// Deployment log configuration

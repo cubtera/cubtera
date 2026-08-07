@@ -4,7 +4,6 @@ use clap::Subcommand;
 use cubtera_config::Config;
 use cubtera_core::services::DimensionService;
 use cubtera_persistence::Repositories;
-use std::sync::Arc;
 
 #[derive(Subcommand)]
 pub enum ImCommands {

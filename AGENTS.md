@@ -57,10 +57,17 @@ cubtera/
 │   │
 │   ├── cubtera-runners/       # Runner implementations
 │   │   └── src/
-│   │       ├── terraform.rs
-│   │       ├── opentofu.rs
-│   │       ├── bash.rs
-│   │       └── factory.rs
+│   │       ├── terraform.rs   # Module declaration (Rust 2018+ style)
+│   │       ├── terraform/     # Terraform runner implementation
+│   │       │   ├── runner.rs  # TerraformRunner
+│   │       │   └── switch.rs  # tfswitch (version manager)
+│   │       ├── opentofu.rs    # OpenTofu module
+│   │       ├── opentofu/
+│   │       │   └── runner.rs
+│   │       ├── bash.rs        # Bash module
+│   │       ├── bash/
+│   │       │   └── runner.rs
+│   │       └── factory.rs     # DefaultRunnerFactory
 │   │
 │   ├── cubtera-config/        # Configuration loading
 │   │
@@ -279,7 +286,7 @@ state_backend = "s3"
 
 ### Runner
 
-Executes infrastructure code. Types: `terraform`, `opentofu`, `bash`
+Executes infrastructure code. Types: `terraform`, `opentofu`, `bash`, etc.
 
 ---
 
@@ -340,6 +347,108 @@ cargo clippy --workspace
 
 ---
 
+## Rust Conventions
+
+### Module File Structure (Rust 2018+ style)
+
+Use the modern module style - `module_name.rs` alongside `module_name/` directory instead of `module_name/mod.rs`:
+
+```
+# CORRECT (Rust 2018+)
+src/
+├── lib.rs
+├── terraform.rs        # Module declaration
+└── terraform/          # Submodules
+    ├── runner.rs
+    └── switch.rs
+
+# AVOID (old style)
+src/
+├── lib.rs
+└── terraform/
+    ├── mod.rs          # Don't use mod.rs
+    ├── runner.rs
+    └── switch.rs
+```
+
+In `terraform.rs`:
+```rust
+//! Terraform runner module
+
+mod runner;
+mod switch;
+
+pub use runner::TerraformRunner;
+```
+
+### Async Blocking Calls
+
+When calling blocking code (e.g., `reqwest::blocking`) from async context, use `spawn_blocking`:
+
+```rust
+// CORRECT
+tokio::task::spawn_blocking(move || blocking_function())
+    .await
+    .map_err(|e| AppError::runner(format!("Task error: {}", e)))?
+
+// WRONG - will panic "Cannot drop a runtime in a context where blocking is not allowed"
+blocking_function()  // Don't call blocking code directly in async fn
+```
+
+---
+
+## Runner Pipeline Pattern
+
+Runners use a pipeline pattern with customizable steps. Each runner can override specific steps while inheriting defaults.
+
+### Pipeline Order
+
+```
+1. copy_files   → Copy unit files to temp folder
+2. change_files → Transform files (e.g., JSON → tfvars)
+3. inlet        → Pre-command execution (optional hook)
+4. runner       → Main command execution
+5. outlet       → Post-command execution (optional hook)
+6. logger       → Logging/audit
+```
+
+### Key Files
+
+- `Unit.temp_folder` - Persistent working directory per unit+dimensions
+- `cubtera_dim_{type}.json` - Dimension data for terraform variables
+- `cubtera_vars.tf` - Auto-generated variable declarations
+
+### Terraform Runner Specifics
+
+```rust
+// TerraformRunner overrides:
+// - copy_files: Removes temp folder only on "init", preserves for plan/apply
+// - change_files: Renames cubtera_*.json to .auto.tfvars.json
+// - runner: Handles version management via tfswitch
+```
+
+### Example Workflow
+
+```bash
+# 1. init: Creates temp folder, copies files, generates dim JSON files
+cubtera run -u myunit -d dc:prod -- init
+
+# 2. plan: Uses existing temp folder, runs terraform plan
+cubtera run -u myunit -d dc:prod -- plan
+
+# 3. apply: Uses existing temp folder, runs terraform apply
+cubtera run -u myunit -d dc:prod --auto-approve -- apply
+```
+
+### Persistent Temp Folder Path
+
+```
+~/.cubtera/temp/{org}/{unit_name}/{dim:value}/{ext:value}
+Example: ~/.cubtera/temp/cubtera/network/dc:prod/index:0
+```
+
+---
+
 ## Notes for AI Agents
 
 1. **Follow the dependency rule** - Domain has no external deps
@@ -349,3 +458,5 @@ cargo clippy --workspace
 5. **v1/ is reference only** - Don't modify, just look at for behavior
 6. **Tests are mandatory** - Every PR needs tests
 7. **English only in code** - Comments, docs, variable names
+8. **Rust 2018+ module style** - Use `module.rs` + `module/` instead of `module/mod.rs`
+9. **Runner pipeline** - Override only needed steps, inherit defaults

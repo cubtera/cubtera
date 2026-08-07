@@ -4,7 +4,7 @@
 
 use crate::error::AppResult;
 use async_trait::async_trait;
-use cubtera_domain::Unit;
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// A deployment log entry
@@ -26,8 +26,8 @@ pub struct DeploymentLogEntry {
     pub duration_ms: u64,
     /// Git SHAs
     pub git_shas: HashMap<String, String>,
-    /// Additional metadata
-    pub metadata: HashMap<String, String>,
+    /// Additional metadata (from runner context)
+    pub metadata: HashMap<String, Value>,
 }
 
 /// Repository for deployment logs

@@ -2,7 +2,9 @@
 
 use crate::error::{AppError, AppResult};
 use crate::ports::{DimensionRepository, UnitRepository};
-use cubtera_domain::{DimType, DimensionRef, Manifest, Unit};
+use cubtera_domain::{DimensionRef, Manifest, Unit};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Service for unit operations
@@ -37,12 +39,26 @@ impl UnitService {
             .await?
             .ok_or_else(|| AppError::not_found("unit", unit_name))?;
 
-        // Parse dimension keys
+        // Parse dimension keys and load dimension data
         let mut dims: Vec<DimensionRef> = Vec::new();
+        let mut dim_data: HashMap<String, Value> = HashMap::new();
+
         for key in dimension_keys {
             let dim_ref = DimensionRef::parse(key).ok_or_else(|| {
                 AppError::validation(format!("Invalid dimension format: {}", key))
             })?;
+
+            // Load dimension data from repository
+            if let Some(dimension) = self
+                .dimension_repository
+                .find_by_name(org, &dim_ref.dim_type, &dim_ref.name)
+                .await?
+            {
+                // Convert HashMap<String, domain::Value> to serde_json::Value
+                let data_value = cubtera_domain::Value::hashmap_to_json(&dimension.data);
+                dim_data.insert(dim_ref.dim_type.as_str().to_string(), data_value);
+            }
+
             dims.push(dim_ref);
         }
 
@@ -54,9 +70,12 @@ impl UnitService {
             unit = unit.with_dimension(dim_ref);
         }
 
-        // Set source path
+        // Add dimension data
+        unit = unit.with_all_dimension_data(dim_data);
+
+        // Set unit path
         if let Some(path) = self.unit_repository.get_unit_path(org, unit_name).await? {
-            unit = unit.with_source_path(path);
+            unit = unit.with_unit_path(path);
         }
 
         // Validate required dimensions

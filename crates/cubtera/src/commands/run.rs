@@ -2,7 +2,9 @@
 
 use clap::Args;
 use cubtera_config::Config;
+use cubtera_core::ports::CopyConfig;
 use cubtera_core::App;
+use cubtera_domain::RunParams;
 use cubtera_persistence::Repositories;
 use cubtera_runners::DefaultRunnerFactory;
 use std::sync::Arc;
@@ -30,39 +32,70 @@ pub async fn run(config: &Config, args: RunArgs) -> Result<(), Box<dyn std::erro
     let repos = Repositories::from_config(config)?;
     let runner_factory = Arc::new(DefaultRunnerFactory::new());
 
-    let app = App::new(repos.dimensions, repos.units, runner_factory, None);
+    // Build CopyConfig from global config
+    let copy_config = CopyConfig {
+        modules_path: config.modules_path.clone(),
+        plugins_path: config.plugins_path.clone(),
+        always_copy_files: config.always_copy_files,
+        clean_cache: config.clean_cache,
+    };
+
+    let app = App::new(
+        repos.dimensions,
+        repos.units,
+        runner_factory,
+        copy_config,
+        None,
+    );
 
     // Build unit
-    let unit = app
+    let mut unit = app
         .units
         .build_unit(&config.org, &args.unit, &args.dimensions)
         .await?;
 
+    // Calculate and set temp folder
+    let temp_folder = unit.calculate_temp_folder(&config.temp_folder_path);
+    unit = unit.with_temp_folder(temp_folder);
+
     println!("Running unit: {}", unit.name);
-    println!("Dimensions: {:?}", unit.dimensions.iter().map(|d| d.key()).collect::<Vec<_>>());
+    println!(
+        "Dimensions: {:?}",
+        unit.dimensions.iter().map(|d| d.key()).collect::<Vec<_>>()
+    );
     println!("Command: {:?}", args.command);
+    println!("Temp folder: {}", unit.temp_folder.display());
     println!();
+
+    // Build params
+    let params = if args.auto_approve {
+        Some(
+            RunParams::new(&unit.temp_folder)
+                .with_commands(args.command.clone())
+                .with_auto_approve(true),
+        )
+    } else {
+        None
+    };
 
     // Execute
     let result = app
         .runners
-        .run(&unit, args.command, args.auto_approve)
+        .run(&unit, args.command, params)
         .await?;
 
     // Output results
-    if !result.stdout.is_empty() {
-        print!("{}", result.stdout);
+    if let Some(output) = &result.output {
+        print!("{}", output);
     }
-    if !result.stderr.is_empty() {
-        eprint!("{}", result.stderr);
-    }
+
+    let exit_code = result.exit_code.unwrap_or(0);
 
     if result.is_success() {
-        println!("\nCompleted successfully in {}ms", result.duration_ms);
+        println!("\nCompleted successfully");
         Ok(())
     } else {
-        eprintln!("\nFailed with exit code {} in {}ms", result.exit_code, result.duration_ms);
-        std::process::exit(result.exit_code);
+        eprintln!("\nFailed with exit code {}", exit_code);
+        std::process::exit(exit_code);
     }
 }
-

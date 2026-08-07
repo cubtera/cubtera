@@ -46,6 +46,26 @@ pub enum DomainError {
     RunnerError {
         reason: String,
     },
+    /// IO/File operation error
+    IoError {
+        reason: String,
+    },
+}
+
+impl DomainError {
+    /// Create a new IO error
+    pub fn io(reason: impl Into<String>) -> Self {
+        Self::IoError {
+            reason: reason.into(),
+        }
+    }
+
+    /// Create a runner error
+    pub fn runner(reason: impl Into<String>) -> Self {
+        Self::RunnerError {
+            reason: reason.into(),
+        }
+    }
 }
 
 impl fmt::Display for DomainError {
@@ -82,6 +102,9 @@ impl fmt::Display for DomainError {
             }
             Self::RunnerError { reason } => {
                 write!(f, "Runner error: {}", reason)
+            }
+            Self::IoError { reason } => {
+                write!(f, "IO error: {}", reason)
             }
         }
     }
