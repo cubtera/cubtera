@@ -3,10 +3,9 @@
 //! Business logic orchestration.
 
 mod dimension;
-mod runner;
+mod run;
 mod unit;
 
-pub use dimension::DimensionService;
-pub use runner::RunnerService;
+pub use dimension::{DimensionService, SchemaValidation};
+pub use run::RunService;
 pub use unit::UnitService;
-

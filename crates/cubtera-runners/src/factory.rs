@@ -1,8 +1,8 @@
 //! Runner factory
 
-use crate::{BashRunner, OpenTofuRunner, TerraformRunner};
+use crate::{BashRunner, HelmRunner, OpenTofuRunner, TerraformRunner};
 use cubtera_core::error::{AppError, AppResult};
-use cubtera_core::ports::{Runner, RunnerFactory};
+use cubtera_core::ports::{RunnerFactory, RunnerStrategy};
 
 /// Default runner factory
 pub struct DefaultRunnerFactory {
@@ -41,17 +41,17 @@ impl Default for DefaultRunnerFactory {
 }
 
 impl RunnerFactory for DefaultRunnerFactory {
-    fn create_runner(&self, runner_type: &str) -> AppResult<Box<dyn Runner>> {
+    fn create_strategy(&self, runner_type: &str) -> AppResult<Box<dyn RunnerStrategy>> {
         match runner_type.to_lowercase().as_str() {
             "tf" | "terraform" => Ok(Box::new(TerraformRunner::new(self.tf_version.clone()))),
             "tofu" | "opentofu" => Ok(Box::new(OpenTofuRunner::new(self.tofu_version.clone()))),
             "bash" | "sh" => Ok(Box::new(BashRunner::new())),
+            "helm" => Ok(Box::new(HelmRunner::new())),
             other => Err(AppError::runner(format!("Unknown runner type: {}", other))),
         }
     }
 
     fn available_runners(&self) -> Vec<&str> {
-        vec!["terraform", "opentofu", "bash"]
+        vec!["terraform", "opentofu", "bash", "helm"]
     }
 }
-

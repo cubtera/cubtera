@@ -1,3 +1,9 @@
 {
-  ".": "1.0.4"
+  "crates/cubtera-domain": "2.0.0",
+  "crates/cubtera-core": "2.0.0",
+  "crates/cubtera-config": "2.0.0",
+  "crates/cubtera-persistence": "2.0.0",
+  "crates/cubtera-runners": "2.0.0",
+  "crates/cubtera": "2.0.0",
+  "crates/cubtera-api": "2.0.0"
 }

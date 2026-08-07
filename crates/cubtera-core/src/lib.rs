@@ -11,6 +11,5 @@ pub mod services;
 
 mod app;
 
-pub use app::App;
+pub use app::{App, AppBuilder};
 pub use error::*;
-

@@ -2,6 +2,7 @@
 //!
 //! Types for representing runner execution parameters and results.
 
+use crate::error::{DomainError, DomainResult};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -136,8 +137,43 @@ impl RunParams {
     }
 }
 
+/// Render `{{org}}`/`{{unit_name}}`/`{{dim_tree}}`-style handlebars
+/// placeholders in every string found anywhere in `template` (recursively
+/// through objects/arrays; non-string leaves pass through unchanged). Used
+/// for `[state.<backend>]` config sections, e.g.
+/// `key = "{{dim_tree}}/{{unit_name}}.tfstate"`. Pure string templating, no
+/// I/O - the caller decides where the template and context come from.
+pub fn render_state_backend_config(template: &Value, context: &Value) -> DomainResult<Value> {
+    let hb = handlebars::Handlebars::new();
+    render_value(template, &hb, context)
+}
+
+fn render_value(
+    value: &Value,
+    hb: &handlebars::Handlebars,
+    context: &Value,
+) -> DomainResult<Value> {
+    match value {
+        Value::String(s) => hb
+            .render_template(s, context)
+            .map(Value::String)
+            .map_err(|e| DomainError::runner(format!("state backend template render error: {e}"))),
+        Value::Array(arr) => arr
+            .iter()
+            .map(|v| render_value(v, hb, context))
+            .collect::<DomainResult<Vec<_>>>()
+            .map(Value::Array),
+        Value::Object(map) => map
+            .iter()
+            .map(|(k, v)| render_value(v, hb, context).map(|rv| (k.clone(), rv)))
+            .collect::<DomainResult<serde_json::Map<_, _>>>()
+            .map(Value::Object),
+        other => Ok(other.clone()),
+    }
+}
+
 /// Result of a runner execution
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RunResult {
     /// Whether execution was successful
     pub success: bool,
@@ -147,17 +183,6 @@ pub struct RunResult {
     pub output: Option<String>,
     /// Metadata collected during pipeline
     pub metadata: HashMap<String, Value>,
-}
-
-impl Default for RunResult {
-    fn default() -> Self {
-        Self {
-            success: false,
-            exit_code: None,
-            output: None,
-            metadata: HashMap::new(),
-        }
-    }
 }
 
 impl RunResult {
@@ -204,9 +229,10 @@ impl RunResult {
 }
 
 /// State backend type
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum StateBackend {
     /// Local file backend
+    #[default]
     Local,
     /// AWS S3 backend
     S3,
@@ -224,6 +250,7 @@ pub enum StateBackend {
 
 impl StateBackend {
     /// Parse from string
+    #[allow(clippy::should_implement_trait)] // infallible, not `FromStr`
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "local" => Self::Local,
@@ -247,12 +274,6 @@ impl StateBackend {
             Self::Consul => "consul",
             Self::Custom(s) => s,
         }
-    }
-}
-
-impl Default for StateBackend {
-    fn default() -> Self {
-        Self::Local
     }
 }
 
@@ -303,11 +324,43 @@ mod tests {
 
     #[test]
     fn test_run_result_metadata() {
-        let result = RunResult::success_result()
-            .with_metadata("key", serde_json::json!("value"));
-        
+        let result = RunResult::success_result().with_metadata("key", serde_json::json!("value"));
+
         assert!(result.metadata.contains_key("key"));
-        assert_eq!(result.metadata.get("key").unwrap(), &serde_json::json!("value"));
+        assert_eq!(
+            result.metadata.get("key").unwrap(),
+            &serde_json::json!("value")
+        );
+    }
+
+    #[test]
+    fn render_state_backend_config_substitutes_context_recursively() {
+        let template = serde_json::json!({
+            "bucket": "{{org}}-example-state",
+            "key": "{{dim_tree}}/{{unit_name}}.tfstate",
+            "region": "us-east-1",
+            "tags": ["{{org}}", "static"]
+        });
+        let context = serde_json::json!({
+            "org": "cubtera",
+            "unit_name": "network",
+            "dim_tree": "env:prod"
+        });
+
+        let rendered = render_state_backend_config(&template, &context).unwrap();
+
+        assert_eq!(rendered["bucket"], "cubtera-example-state");
+        assert_eq!(rendered["key"], "env:prod/network.tfstate");
+        assert_eq!(rendered["region"], "us-east-1");
+        assert_eq!(rendered["tags"][0], "cubtera");
+        assert_eq!(rendered["tags"][1], "static");
+    }
+
+    #[test]
+    fn render_state_backend_config_errors_on_unknown_helper() {
+        let template = serde_json::json!({"key": "{{#bogus}}x{{/bogus}}"});
+        let context = serde_json::json!({});
+        assert!(render_state_backend_config(&template, &context).is_err());
     }
 
     #[test]
@@ -320,4 +373,3 @@ mod tests {
         ));
     }
 }
-

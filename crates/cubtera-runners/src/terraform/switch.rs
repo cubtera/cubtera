@@ -73,10 +73,7 @@ fn is_binary_available(path: &PathBuf) -> bool {
 
 /// Calculate lock port from version string
 fn version_to_port(version: &str) -> u16 {
-    let num: u32 = version
-        .replace('.', "")
-        .parse()
-        .unwrap_or(0);
+    let num: u32 = version.replace('.', "").parse().unwrap_or(0);
     ((num % 5430) + 60000) as u16
 }
 
@@ -126,17 +123,15 @@ fn wait_for_download(port: u16, version: &str) -> AppResult<()> {
 /// Download and extract terraform binary
 fn download_terraform(tf_folder: &PathBuf, version: &str) -> AppResult<()> {
     // Create directory
-    std::fs::create_dir_all(tf_folder).map_err(|e| {
-        AppError::runner(format!("Failed to create terraform directory: {}", e))
-    })?;
+    std::fs::create_dir_all(tf_folder)
+        .map_err(|e| AppError::runner(format!("Failed to create terraform directory: {}", e)))?;
 
     let zip_path = tf_folder.join("tmp.zip");
     let tf_path = tf_folder.join("terraform");
 
     // Create placeholder to prevent other processes from downloading
-    std::fs::File::create(&zip_path).map_err(|e| {
-        AppError::runner(format!("Failed to create temp file: {}", e))
-    })?;
+    std::fs::File::create(&zip_path)
+        .map_err(|e| AppError::runner(format!("Failed to create temp file: {}", e)))?;
 
     let os = get_os_string();
     let url = format!(
@@ -166,23 +161,20 @@ fn download_terraform(tf_folder: &PathBuf, version: &str) -> AppResult<()> {
         AppError::runner(format!("Failed to read download: {}", e))
     })?;
 
-    std::fs::write(&zip_path, &bytes).map_err(|e| {
-        AppError::runner(format!("Failed to save zip: {}", e))
-    })?;
+    std::fs::write(&zip_path, &bytes)
+        .map_err(|e| AppError::runner(format!("Failed to save zip: {}", e)))?;
 
     // Extract zip
     debug!("Extracting: {}", zip_path.display());
-    let zip_file = std::fs::File::open(&zip_path).map_err(|e| {
-        AppError::runner(format!("Failed to open zip: {}", e))
-    })?;
+    let zip_file = std::fs::File::open(&zip_path)
+        .map_err(|e| AppError::runner(format!("Failed to open zip: {}", e)))?;
 
-    let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| {
-        AppError::runner(format!("Failed to read zip: {}", e))
-    })?;
+    let mut archive = zip::ZipArchive::new(zip_file)
+        .map_err(|e| AppError::runner(format!("Failed to read zip: {}", e)))?;
 
-    archive.extract(tf_folder).map_err(|e| {
-        AppError::runner(format!("Failed to extract zip: {}", e))
-    })?;
+    archive
+        .extract(tf_folder)
+        .map_err(|e| AppError::runner(format!("Failed to extract zip: {}", e)))?;
 
     // Make executable on Unix
     #[cfg(unix)]
@@ -206,7 +198,7 @@ fn download_terraform(tf_folder: &PathBuf, version: &str) -> AppResult<()> {
 /// Get latest terraform version from HashiCorp API
 fn get_latest_version() -> AppResult<String> {
     let url = "https://api.releases.hashicorp.com/v1/releases/terraform/latest";
-    
+
     let response: serde_json::Value = reqwest::blocking::get(url)
         .map_err(|e| AppError::runner(format!("Failed to fetch latest version: {}", e)))?
         .json()
@@ -257,4 +249,3 @@ mod tests {
         // Should be something like "darwin_arm64" or "linux_amd64"
     }
 }
-

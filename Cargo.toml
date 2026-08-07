@@ -8,6 +8,7 @@ members = [
     "crates/cubtera-runners",
     "crates/cubtera",
     "crates/cubtera-api",
+    "crates/cubtera-mcp",
 ]
 
 [workspace.package]
@@ -22,9 +23,15 @@ description = "Multi-dimensional Infrastructure Manager"
 # Domain (zero deps)
 # (none)
 
+# Domain (canonical hashing for data_sha)
+sha2 = "0.10"
+# Domain (`.schema:meta.json` validation - pure, no I/O of its own)
+jsonschema = "0.37"
+
 # Application
 thiserror = "2.0"
 async-trait = "0.1"
+handlebars = "6"
 
 # Infrastructure
 serde = { version = "1.0", features = ["derive"] }
@@ -36,7 +43,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Persistence adapters
 mongodb = "3.8.0"
-# sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }  # Future
+futures = "0.3"
 
 # Runners
 reqwest = { version = "0.13", default-features = false, features = [ "blocking", "json", "rustls" ] }
@@ -51,6 +58,10 @@ clap = { version = "4", features = ["derive"] }
 axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.7", features = ["cors", "trace"] }
+
+# MCP
+rmcp = { version = "3", features = ["server", "macros", "transport-io", "schemars"] }
+schemars = "1.0"
 
 # Testing
 tempfile = "3"

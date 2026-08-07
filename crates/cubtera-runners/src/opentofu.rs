@@ -6,4 +6,3 @@
 mod runner;
 
 pub use runner::OpenTofuRunner;
-

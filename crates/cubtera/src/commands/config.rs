@@ -1,15 +1,28 @@
 //! Config command
 
+use super::Ctx;
 use cubtera_config::Config;
 
-pub fn run(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(config: &Config, ctx: &Ctx) -> Result<(), Box<dyn std::error::Error>> {
+    if ctx.json {
+        println!("{}", serde_json::to_string_pretty(config)?);
+        return Ok(());
+    }
+
     println!("Cubtera Configuration");
     println!("=====================");
     println!();
     println!("Organization: {}", config.org);
+    if !config.orgs.is_empty() {
+        println!("Known Orgs: {:?}", config.orgs);
+    }
     println!("Log Level: {}", config.log_level);
     println!();
-    println!("Storage: {:?}", config.storage);
+    if let Some(db) = &config.mongodb_connection_string {
+        println!("Storage: MongoDB ({db})");
+    } else {
+        println!("Storage: FS ({:?})", config.inventory_path);
+    }
     println!();
     println!("Paths:");
     println!("  Units: {:?}", config.units_path);
@@ -17,6 +30,15 @@ pub fn run(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     println!("  Plugins: {:?}", config.plugins_path);
     println!();
     println!("Dimension Relations: {:?}", config.dim_relations);
+    if !config.runner.is_empty() {
+        println!("Runner Config: {:?}", config.runner);
+    }
+    if !config.state.is_empty() {
+        println!(
+            "State Backends: {:?}",
+            config.state.keys().collect::<Vec<_>>()
+        );
+    }
 
     if let Some(dlog) = &config.deployment_log {
         println!();
@@ -27,4 +49,3 @@ pub fn run(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

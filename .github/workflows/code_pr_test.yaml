@@ -2,6 +2,7 @@ on:
   pull_request:
     branches:
       - main
+      - v2-rewrite
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
@@ -14,36 +15,82 @@ permissions:
 name: Code changes test
 jobs:
   build:
-    name: Build and test
+    name: Build and test workspace
     runs-on: ubuntu-22.04
+
+    services:
+      # Backs the MongoDB `InventoryRepository` contract tests
+      # (`crates/cubtera-persistence/tests/inventory_contract_mongo.rs`) -
+      # see `w2-mongo-dlog` in the hexagonal migration plan. Those tests
+      # skip themselves (without failing) when `CUBTERA_TEST_MONGO_URL`
+      # isn't set, so this service only matters for the "Mongo contract
+      # tests" step below.
+      # Also backs `tests/deployment_log_contract_mongo.rs`
+      # (`MongoDeploymentLogRepository`).
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --component clippy,rustfmt
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Pre-build install dependencies
         run: |
           sudo apt update
-          sudo apt install -y -qq libssl-dev pkg-config musl-tools 
-          sudo update-ca-certificates
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          export PATH=$PATH:$HOME/.cargo/bin
-          rustup target add x86_64-unknown-linux-musl
+          sudo apt install -y -qq libssl-dev pkg-config
 
-      - name: Generate Cargo.lock
-        run: |
-          cargo generate-lockfile
+      # `terraform` self-downloads via `tfswitch` (TerraformRunner), so it
+      # needs no install step here. `tofu`/`helm` have no such auto-install
+      # path - crates/cubtera/tests/e2e_run.rs skips those tests (without
+      # failing) when the binary isn't on PATH, so installing them here is
+      # what makes the tofu/helm real-execution tests actually run in CI.
+      - name: Install OpenTofu
+        uses: opentofu/setup-opentofu@v1
 
-#      - name: Rust cache
-#        uses: actions/cache@v4
-#        with:
-#          path: |
-#            ~/.cargo/bin/
-#            ~/.cargo/registry/index/
-#            ~/.cargo/registry/cache/
-#            ~/.cargo/git/db/
-#            target/
-#          key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install Helm
+        uses: azure/setup-helm@v4
 
-      - name: Build and test
-        run: |
-          cargo test --target x86_64-unknown-linux-musl
+      - name: Rust cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-workspace-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-workspace-
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      # `--all-features` is intentionally omitted from the workspace-wide
+      # commands below: most crates have no extra features, and the
+      # `mongodb` feature on cubtera-persistence is checked/tested
+      # separately (it pulls in a real driver + service container, which
+      # would slow down every other crate's clippy/test run for no reason).
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Clippy (cubtera-persistence, mongodb feature)
+        run: cargo clippy -p cubtera-persistence --all-targets --features mongodb -- -D warnings
+
+      - name: Test (workspace)
+        run: cargo test --workspace
+
+      # Runs the same InventoryRepository/DeploymentLogRepository contract
+      # suites as their FS adapters (`tests/inventory_contract_fs.rs`,
+      # `tests/deployment_log_contract_fs.rs`) against the `mongodb:7`
+      # service above - this is what "проходит контрактные тесты" means for
+      # the MongoDB adapters in the migration plan's wave 2.
+      - name: Test (cubtera-persistence, MongoDB contract suites)
+        run: cargo test -p cubtera-persistence --features mongodb --test inventory_contract_mongo --test deployment_log_contract_mongo
+        env:
+          CUBTERA_TEST_MONGO_URL: mongodb://127.0.0.1:27017

@@ -10,4 +10,3 @@ pub async fn health_check() -> Json<Value> {
         "version": env!("CARGO_PKG_VERSION")
     }))
 }
-

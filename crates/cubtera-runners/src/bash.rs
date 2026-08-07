@@ -5,4 +5,3 @@
 mod runner;
 
 pub use runner::BashRunner;
-

@@ -1,19 +1,20 @@
-//! Runner port (interface)
+//! Runner strategy port (interface)
 //!
-//! Trait for infrastructure runners with a pipeline pattern.
-//! Each runner can override specific pipeline steps while inheriting defaults.
-//!
-//! Pipeline order:
-//! 1. copy_files   - Copy unit files to temp folder
-//! 2. change_files - Transform files (e.g., JSON → tfvars)
-//! 3. inlet        - Pre-command execution
-//! 4. runner       - Main command execution
-//! 5. outlet       - Post-command execution
-//! 6. logger       - Logging/audit
+//! `RunnerStrategy` only expresses what differs *between* runner types
+//! (terraform/opentofu/bash): which binary to run, how to build its
+//! arguments and environment, and any file transforms needed before running
+//! it. The pipeline itself - materialize, transform, inlet, exec, outlet,
+//! log - is owned by `RunService` (see `crate::services::RunService`), not
+//! by this trait. This is the split called for by the migration plan's
+//! "разобрать god-trait Runner" item: the previous `Runner` trait *was* the
+//! pipeline (with I/O-performing default methods each strategy inherited),
+//! which meant every override had to re-implement pipeline concerns
+//! (removing/copying files) alongside its actual differences.
 
 use crate::error::AppResult;
+use crate::ports::{ProcessRunner, ProcessSpec};
 use async_trait::async_trait;
-use cubtera_domain::{RunParams, RunResult, Unit};
+use cubtera_domain::{MaterializationPlan, RunParams, Unit};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -50,222 +51,141 @@ impl RunContext {
     }
 }
 
-/// Configuration for copy_files step
+/// Configuration for the materialize pipeline step
 #[derive(Debug, Clone)]
 pub struct CopyConfig {
     /// Path to modules directory
     pub modules_path: PathBuf,
     /// Path to plugins directory
     pub plugins_path: PathBuf,
-    /// Always copy files (not just on init)
+    /// Always re-materialize files even when the temp folder already exists
     pub always_copy_files: bool,
-    /// Clean temp cache after successful run
+    /// Clean temp cache after a successful run
     pub clean_cache: bool,
 }
 
-/// Runner for executing infrastructure code
-///
-/// Implements a pipeline pattern where each step can be overridden.
-/// The `run` method executes all steps in order.
+/// How `RunService` should prepare a unit's temp folder before materializing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrepareMode {
+    /// Remove any existing temp folder, then materialize fresh. This is the
+    /// only safe default: a stale temp folder from a previous, differently
+    /// configured run must not silently linger.
+    CleanAndMaterialize,
+    /// Require an existing temp folder (`RunService` fails otherwise);
+    /// optionally re-materialize on top of it without cleaning first.
+    RequireExisting {
+        /// Re-apply the materialization plan over the existing folder
+        rematerialize: bool,
+    },
+}
+
+/// The behavior specific to one runner type (terraform/opentofu/bash/...).
+/// Everything else - copying files, running inlet/outlet hooks, logging - is
+/// handled once by `RunService` for every strategy.
 #[async_trait]
-pub trait Runner: Send + Sync {
-    /// Get the runner name for logging
+pub trait RunnerStrategy: Send + Sync {
+    /// Runner name, for logging
     fn name(&self) -> &str;
 
-    // ============ PIPELINE STEPS ============
-    // Each step can be overridden by specific runners.
-    // Default implementations provide reasonable behavior.
-
-    /// Step 1: Copy files to temp folder
-    ///
-    /// Default: Remove temp folder and copy unit files.
-    /// Override: Terraform checks if command is "init" before removing.
-    async fn copy_files(
-        &self,
-        unit: &Unit,
-        _params: &RunParams,
-        ctx: &mut RunContext,
-        copy_config: &CopyConfig,
-    ) -> AppResult<()> {
-        // Default implementation: always remove and copy
-        unit.remove_temp_folder().map_err(|e| {
-            crate::error::AppError::runner(format!("Failed to remove temp folder: {}", e))
-        })?;
-
-        unit.copy_files_to_temp(&copy_config.modules_path, &copy_config.plugins_path)
-            .map_err(|e| {
-                crate::error::AppError::runner(format!("Failed to copy files: {}", e))
-            })?;
-
-        ctx.working_dir = unit.temp_folder.clone();
-        ctx.set_metadata("copy_files", serde_json::json!("executed"));
-        Ok(())
-    }
-
-    /// Step 2: Transform files (e.g., JSON → tfvars)
-    ///
-    /// Default: No-op.
-    /// Override: Terraform converts cubtera_*.json to .auto.tfvars.json
-    async fn change_files(
-        &self,
-        _unit: &Unit,
-        _params: &RunParams,
-        ctx: &mut RunContext,
-    ) -> AppResult<()> {
-        ctx.set_metadata("change_files", serde_json::json!("passed"));
-        Ok(())
-    }
-
-    /// Step 3: Pre-command execution
-    ///
-    /// Default: Execute inlet_command if set in params.
-    async fn inlet(
-        &self,
-        _unit: &Unit,
-        params: &RunParams,
-        ctx: &mut RunContext,
-    ) -> AppResult<()> {
-        if let Some(cmd) = &params.inlet_command {
-            let exit_code = execute_shell_command(cmd, &ctx.working_dir)?;
-            ctx.set_metadata("inlet", serde_json::json!({
-                "command": cmd,
-                "exit_code": exit_code
-            }));
-            if exit_code != 0 {
-                return Err(crate::error::AppError::runner(format!(
-                    "Inlet command failed with exit code: {}",
-                    exit_code
-                )));
-            }
-        } else {
-            ctx.set_metadata("inlet", serde_json::json!("skipped"));
-        }
-        Ok(())
-    }
-
-    /// Step 4: Main runner execution
-    ///
-    /// MUST be overridden by each runner implementation.
-    async fn runner(
-        &self,
-        unit: &Unit,
-        params: &RunParams,
-        ctx: &mut RunContext,
-    ) -> AppResult<()>;
-
-    /// Step 5: Post-command execution
-    ///
-    /// Default: Execute outlet_command if set in params.
-    async fn outlet(
-        &self,
-        _unit: &Unit,
-        params: &RunParams,
-        ctx: &mut RunContext,
-    ) -> AppResult<()> {
-        if let Some(cmd) = &params.outlet_command {
-            let exit_code = execute_shell_command(cmd, &ctx.working_dir)?;
-            ctx.set_metadata("outlet", serde_json::json!({
-                "command": cmd,
-                "exit_code": exit_code
-            }));
-            if exit_code != 0 {
-                return Err(crate::error::AppError::runner(format!(
-                    "Outlet command failed with exit code: {}",
-                    exit_code
-                )));
-            }
-        } else {
-            ctx.set_metadata("outlet", serde_json::json!("skipped"));
-        }
-        Ok(())
-    }
-
-    /// Step 6: Logging and audit
-    ///
-    /// Default: Log execution result.
-    /// Override: Send to deployment log database.
-    async fn logger(
-        &self,
-        _unit: &Unit,
-        _params: &RunParams,
-        ctx: &mut RunContext,
-    ) -> AppResult<()> {
-        ctx.set_metadata("logger", serde_json::json!("passed"));
-        tracing::debug!(
-            runner = self.name(),
-            exit_code = ?ctx.exit_code,
-            working_dir = ?ctx.working_dir,
-            "Runner execution completed"
-        );
-        Ok(())
-    }
-
-    // ============ MAIN ENTRY POINT ============
-
-    /// Execute the full pipeline
-    ///
-    /// Runs all steps in order: copy_files → change_files → inlet → runner → outlet → logger
-    ///
-    /// This method should generally NOT be overridden.
-    async fn run(
-        &self,
-        unit: &Unit,
-        params: &RunParams,
-        copy_config: &CopyConfig,
-    ) -> AppResult<RunResult> {
-        let mut ctx = RunContext::new(unit.temp_folder.clone());
-
-        tracing::info!(
-            runner = self.name(),
-            unit = %unit.name,
-            command = ?params.command,
-            "Starting runner pipeline"
-        );
-
-        self.copy_files(unit, params, &mut ctx, copy_config).await?;
-        self.change_files(unit, params, &mut ctx).await?;
-        self.inlet(unit, params, &mut ctx).await?;
-        self.runner(unit, params, &mut ctx).await?;
-        self.outlet(unit, params, &mut ctx).await?;
-        self.logger(unit, params, &mut ctx).await?;
-
-        Ok(RunResult {
-            success: ctx.exit_code.unwrap_or(0) == 0,
-            exit_code: ctx.exit_code,
-            output: None,
-            metadata: ctx.metadata,
-        })
-    }
-
-    // ============ OPTIONAL LIFECYCLE ============
-
-    /// Initialize the runner (e.g., download binaries)
+    /// One-time setup (e.g. pre-download a pinned binary version)
     async fn init(&self) -> AppResult<()> {
         Ok(())
     }
+
+    /// How to prepare the temp folder for this command. Default: always
+    /// clean and materialize fresh, which is correct for one-shot runners
+    /// like bash. Terraform/OpenTofu override this to require `init` to
+    /// have run first.
+    fn prepare_mode(&self, _params: &RunParams, _copy_config: &CopyConfig) -> PrepareMode {
+        PrepareMode::CleanAndMaterialize
+    }
+
+    /// Add strategy-specific steps to the materialization plan (e.g.
+    /// terraform's `cubtera_backend.tf`) before it's applied. Called exactly
+    /// when the plan is about to be applied - i.e. not at all when
+    /// `prepare_mode` returns `RequireExisting { rematerialize: false }`.
+    fn extend_plan(&self, _unit: &Unit, _params: &RunParams, _plan: &mut MaterializationPlan) {}
+
+    /// Transform already-materialized files in the temp folder (e.g.
+    /// converting `cubtera_*.json` to `*.auto.tfvars.json`). Runs after the
+    /// plan is applied, before `execute`.
+    async fn transform_files(&self, _unit: &Unit, _ctx: &RunContext) -> AppResult<()> {
+        Ok(())
+    }
+
+    /// Resolve the executable to run
+    async fn binary(&self, unit: &Unit, ctx: &RunContext, params: &RunParams)
+        -> AppResult<PathBuf>;
+
+    /// Build the argument list (default: just the raw command, e.g. `["plan"]`)
+    async fn build_args(
+        &self,
+        _unit: &Unit,
+        _ctx: &RunContext,
+        params: &RunParams,
+    ) -> AppResult<Vec<String>> {
+        Ok(params.command.clone())
+    }
+
+    /// Strategy-specific environment variables (default: none)
+    fn env_vars(&self, _unit: &Unit, _params: &RunParams) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
+    /// Resolve and run the command through `process`. The default composes
+    /// `binary`/`build_args`/`env_vars` into one [`ProcessSpec`]; override
+    /// when the call itself needs extra control (terraform wraps this in an
+    /// init lock).
+    async fn execute(
+        &self,
+        unit: &Unit,
+        params: &RunParams,
+        ctx: &mut RunContext,
+        process: &dyn ProcessRunner,
+    ) -> AppResult<()> {
+        let program = self.binary(unit, ctx, params).await?;
+        let args = self.build_args(unit, ctx, params).await?;
+        let env = merged_env(self.env_vars(unit, params), params);
+
+        let spec = ProcessSpec {
+            program: program.clone(),
+            args: args.clone(),
+            working_dir: ctx.working_dir.clone(),
+            env,
+        };
+        let output = process.exec(&spec).await?;
+
+        ctx.exit_code = Some(output.exit_code);
+        ctx.set_metadata(
+            "runner",
+            serde_json::json!({
+                "binary": program.display().to_string(),
+                "command": args,
+                "exit_code": output.exit_code,
+            }),
+        );
+        Ok(())
+    }
 }
 
-/// Factory for creating runners
+/// Merge a strategy's own env vars with the caller-supplied `params.env_vars`
+/// (which win on conflicts - they're the more specific, per-invocation override).
+pub fn merged_env(
+    strategy_env: Vec<(String, String)>,
+    params: &RunParams,
+) -> HashMap<String, String> {
+    let mut env: HashMap<String, String> = strategy_env.into_iter().collect();
+    for (k, v) in &params.env_vars {
+        env.insert(k.clone(), v.clone());
+    }
+    env
+}
+
+/// Factory for creating runner strategies
 pub trait RunnerFactory: Send + Sync {
-    /// Create a runner for the given type
-    fn create_runner(&self, runner_type: &str) -> AppResult<Box<dyn Runner>>;
+    /// Create a strategy for the given runner type
+    fn create_strategy(&self, runner_type: &str) -> AppResult<Box<dyn RunnerStrategy>>;
 
     /// Get available runner types
     fn available_runners(&self) -> Vec<&str>;
-}
-
-/// Execute a shell command in a directory
-fn execute_shell_command(command: &str, working_dir: &PathBuf) -> AppResult<i32> {
-    use std::process::Command;    let output = Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .current_dir(working_dir)
-        .spawn()
-        .map_err(|e| {
-            crate::error::AppError::runner(format!("Failed to spawn command: {}", e))
-        })?
-        .wait()
-        .map_err(|e| {
-            crate::error::AppError::runner(format!("Failed to wait for command: {}", e))
-        })?;    Ok(output.code().unwrap_or(1))
 }

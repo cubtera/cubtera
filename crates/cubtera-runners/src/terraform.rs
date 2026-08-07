@@ -6,4 +6,3 @@ mod runner;
 mod switch;
 
 pub use runner::TerraformRunner;
-

@@ -1,45 +1,100 @@
 //! Repository factory
 
-use cubtera_config::{Config, StorageBackend};
-use cubtera_core::ports::{DimensionRepository, UnitRepository};
+use cubtera_config::Config;
+use cubtera_core::ports::{DeploymentLogRepository, InventoryRepository, UnitRepository};
+use cubtera_domain::DimHierarchy;
 use std::sync::Arc;
 
 /// Create repositories based on configuration
 pub struct Repositories {
-    pub dimensions: Arc<dyn DimensionRepository>,
+    pub inventory: Arc<dyn InventoryRepository>,
     pub units: Arc<dyn UnitRepository>,
+    pub deployment_log: Arc<dyn DeploymentLogRepository>,
 }
 
 impl Repositories {
-    /// Create repositories from config
-    pub fn from_config(config: &Config) -> Result<Self, String> {
-        match &config.storage {
-            #[cfg(feature = "fs")]
-            StorageBackend::Fs { path } => {
-                let dim_repo = crate::fs::FsDimensionRepository::new(
-                    path.clone(),
-                    config.org.clone(),
-                );
-                let unit_repo = crate::fs::FsUnitRepository::new(
-                    config.units_path.clone(),
-                    config.org.clone(),
-                );
-                Ok(Self {
-                    dimensions: Arc::new(dim_repo),
-                    units: Arc::new(unit_repo),
-                })
-            }
-            #[cfg(feature = "mongodb")]
-            StorageBackend::MongoDB { connection_string } => {
-                // MongoDB implementation would go here
-                Err("MongoDB not yet implemented".to_string())
-            }
-            StorageBackend::Postgres { .. } => {
-                Err("PostgreSQL not yet implemented".to_string())
-            }
-            #[allow(unreachable_patterns)]
-            _ => Err("No matching storage backend feature enabled".to_string()),
+    /// Create repositories from config.
+    ///
+    /// Inventory backend selection mirrors v1: `CUBTERA_DB` set (surfaced as
+    /// [`Config::mongodb_connection_string`]) means Mongo, otherwise FS via
+    /// `inventory_path`. Enabling the `mongodb` connection string without
+    /// the `mongodb` feature compiled in is a hard error rather than a
+    /// silent FS fallback.
+    ///
+    /// Deployment log backend selection is independent: `config.toml`'s
+    /// `[deploymentLog]` table set means Mongo, otherwise FS-jsonl rooted at
+    /// `deployment_log_path`.
+    pub async fn from_config(config: &Config) -> Result<Self, String> {
+        let unit_repo = crate::fs::FsUnitRepository::new(config.units_path.clone());
+        let deployment_log = Self::deployment_log_from_config(config).await?;
+
+        #[cfg(feature = "mongodb")]
+        if let Some(connection_string) = &config.mongodb_connection_string {
+            let inventory = crate::mongodb::MongoInventoryRepository::new(
+                connection_string,
+                config.file_name_separator.clone(),
+            )
+            .await?;
+            return Ok(Self {
+                inventory: Arc::new(inventory),
+                units: Arc::new(unit_repo),
+                deployment_log,
+            });
+        }
+
+        #[cfg(not(feature = "mongodb"))]
+        if config.mongodb_connection_string.is_some() {
+            return Err(
+                "CUBTERA_DB is set but this build has no `mongodb` feature enabled".to_string(),
+            );
+        }
+
+        #[cfg(feature = "fs")]
+        {
+            let inventory = crate::fs::FsInventoryRepository::new(config.inventory_path.clone())
+                .with_separator(config.file_name_separator.clone());
+            Ok(Self {
+                inventory: Arc::new(inventory),
+                units: Arc::new(unit_repo),
+                deployment_log,
+            })
+        }
+
+        #[cfg(not(feature = "fs"))]
+        {
+            Err("No matching storage backend feature enabled".to_string())
         }
     }
-}
 
+    async fn deployment_log_from_config(
+        config: &Config,
+    ) -> Result<Arc<dyn DeploymentLogRepository>, String> {
+        #[cfg(feature = "mongodb")]
+        if let Some(dlog_config) = &config.deployment_log {
+            let repo = crate::mongodb::MongoDeploymentLogRepository::new(
+                &dlog_config.connection_string,
+                &dlog_config.database,
+                &dlog_config.collection,
+            )
+            .await?;
+            return Ok(Arc::new(repo));
+        }
+
+        #[cfg(not(feature = "mongodb"))]
+        if config.deployment_log.is_some() {
+            return Err(
+                "[deploymentLog] is set but this build has no `mongodb` feature enabled"
+                    .to_string(),
+            );
+        }
+
+        Ok(Arc::new(crate::fs::FsDeploymentLogRepository::new(
+            config.deployment_log_path.clone(),
+        )))
+    }
+
+    /// Build a [`DimHierarchy`] from the config's `dim_relations`
+    pub fn hierarchy(config: &Config) -> DimHierarchy {
+        DimHierarchy::new(config.dim_relations.clone())
+    }
+}

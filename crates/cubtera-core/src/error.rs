@@ -36,6 +36,13 @@ pub enum AppError {
     /// Validation error
     #[error("Validation error: {0}")]
     Validation(String),
+
+    /// A unit's access policy (allowList/denyList/affinityTags) denied
+    /// execution for the provided dimensions - see [`cubtera_domain::AccessPolicy`].
+    /// Distinct from `Validation`: this is an intentional, expected outcome
+    /// (v1's `exit(0)`), not a usage error.
+    #[error("Access denied: {0}")]
+    AccessDenied(String),
 }
 
 impl AppError {
@@ -71,6 +78,11 @@ impl AppError {
     pub fn validation(msg: impl Into<String>) -> Self {
         Self::Validation(msg.into())
     }
+
+    /// Create an access-denied error
+    pub fn access_denied(msg: impl Into<String>) -> Self {
+        Self::AccessDenied(msg.into())
+    }
 }
 
 impl From<std::io::Error> for AppError {
@@ -78,4 +90,3 @@ impl From<std::io::Error> for AppError {
         Self::Io(e.to_string())
     }
 }
-

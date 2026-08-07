@@ -3,7 +3,7 @@ name = "cubtera-persistence"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Cubtera persistence adapters (FS, MongoDB, Postgres)"
+description = "Cubtera persistence adapters (FS, MongoDB)"
 
 [dependencies]
 cubtera-domain.workspace = true
@@ -20,6 +20,7 @@ tracing.workspace = true
 
 # MongoDB support (optional)
 mongodb = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -28,6 +29,5 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 [features]
 default = ["fs"]
 fs = []
-mongodb = ["dep:mongodb"]
-# postgres = ["dep:sqlx"]  # Future
+mongodb = ["dep:mongodb", "dep:futures"]
 

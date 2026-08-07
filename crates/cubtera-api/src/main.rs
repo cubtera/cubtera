@@ -1,5 +1,7 @@
 //! Cubtera REST API Server
 
+mod auth;
+mod error;
 mod routes;
 mod server;
 
@@ -23,4 +25,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = std::env::var("CUBTERA_API_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     server::run(&addr, config).await
 }
-

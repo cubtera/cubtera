@@ -2,9 +2,9 @@
 //!
 //! A Unit represents an atomic infrastructure operation.
 
-use crate::dimension::{DimType, Dimension};
-use crate::error::{DomainError, DomainResult};
+use crate::dimension::{DimType, Dimension, IncludeEntry};
 use crate::manifest::Manifest;
+use crate::materialization::{MaterializationPlan, MaterializationStep};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,6 +22,10 @@ pub struct Unit {
     pub dimensions: Vec<DimensionRef>,
     /// Dimension data (type -> data JSON)
     pub dimension_data: HashMap<String, Value>,
+    /// Non-JSON includes attached to this unit's dimensions (aggregated
+    /// across all resolved dimensions), copied into the temp folder at
+    /// materialization time.
+    pub includes: Vec<IncludeEntry>,
     /// Source path (unit directory)
     pub unit_path: PathBuf,
     /// Temp folder for runner execution
@@ -81,6 +85,7 @@ impl Unit {
             manifest,
             dimensions: Vec::new(),
             dimension_data: HashMap::new(),
+            includes: Vec::new(),
             unit_path: PathBuf::new(),
             temp_folder: PathBuf::new(),
             extensions: Vec::new(),
@@ -124,20 +129,26 @@ impl Unit {
         self
     }
 
+    /// Set aggregated dimension includes
+    pub fn with_includes(mut self, includes: Vec<IncludeEntry>) -> Self {
+        self.includes = includes;
+        self
+    }
+
     /// Calculate temp folder path based on org, unit name, dimensions and extensions
     pub fn calculate_temp_folder(&self, base_temp_path: &Path) -> PathBuf {
         let mut path = base_temp_path.join(&self.org).join(&self.name);
-        
+
         // Add dimensions to path
         for dim in &self.dimensions {
             path = path.join(dim.key());
         }
-        
+
         // Add extensions to path
         for ext in &self.extensions {
             path = path.join(ext);
         }
-        
+
         path
     }
 
@@ -160,13 +171,17 @@ impl Unit {
 
     /// Get dimension reference by type
     pub fn get_dimension(&self, dim_type: &str) -> Option<&DimensionRef> {
-        self.dimensions.iter().find(|d| d.dim_type.as_str() == dim_type)
+        self.dimensions
+            .iter()
+            .find(|d| d.dim_type.as_str() == dim_type)
     }
 
     /// Check if unit has all required dimensions from manifest
     pub fn has_all_required_dimensions(&self) -> bool {
         self.manifest.dimensions.iter().all(|required| {
-            self.dimensions.iter().any(|d| d.dim_type.as_str() == required)
+            self.dimensions
+                .iter()
+                .any(|d| d.dim_type.as_str() == required)
         })
     }
 
@@ -176,23 +191,13 @@ impl Unit {
             .dimensions
             .iter()
             .filter(|required| {
-                !self.dimensions.iter().any(|d| d.dim_type.as_str() == required.as_str())
+                !self
+                    .dimensions
+                    .iter()
+                    .any(|d| d.dim_type.as_str() == required.as_str())
             })
             .map(|s| s.as_str())
             .collect()
-    }
-
-    /// Remove temp folder if it exists
-    pub fn remove_temp_folder(&self) -> DomainResult<()> {
-        if self.temp_folder.exists() {
-            std::fs::remove_dir_all(&self.temp_folder).map_err(|e| {
-                DomainError::io(format!(
-                    "Failed to remove temp folder {:?}: {}",
-                    self.temp_folder, e
-                ))
-            })?;
-        }
-        Ok(())
     }
 
     /// Check if temp folder exists
@@ -200,132 +205,173 @@ impl Unit {
         self.temp_folder.exists()
     }
 
-    /// Copy unit files to temp folder
-    pub fn copy_files_to_temp(
+    /// Build this unit's [`MaterializationPlan`]: modules symlink, the
+    /// generic (org-less) unit's files if `manifest.overwrite` is set, this
+    /// unit's own files, per-dimension `cubtera_dim_{type}.json` (including
+    /// null placeholders for declared-but-unprovided `optDims`, matching
+    /// v1), dimension includes, `cubtera_ext.json` for extensions, and
+    /// `spec.files`. Pure - no I/O, fully testable and `--dry-run`-printable.
+    pub fn materialize(
         &self,
         modules_path: &Path,
-        plugins_path: &Path,
-    ) -> DomainResult<()> {
-        let dest = &self.temp_folder;
+        generic_unit_path: Option<&Path>,
+    ) -> MaterializationPlan {
+        let mut plan = MaterializationPlan::new(self.temp_folder.clone());
 
-        // Create temp folder if not exists
-        if !dest.exists() {
-            std::fs::create_dir_all(dest).map_err(|e| {
-                DomainError::io(format!("Failed to create temp folder {:?}: {}", dest, e))
-            })?;
-        }
+        plan.push(MaterializationStep::Symlink {
+            target: modules_path.to_path_buf(),
+            link: self.temp_folder.join("modules"),
+        });
 
-        // Create modules symlink
-        let modules_link = dest.join("modules");
-        if !modules_link.exists() && modules_path.exists() {
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(modules_path, &modules_link).map_err(|e| {
-                DomainError::io(format!("Failed to create modules symlink: {}", e))
-            })?;
-        }
-
-        // Copy plugins to ~/.terraform.d/plugins (if plugins_path exists)
-        if plugins_path.exists() {
-            if let Some(home) = std::env::var("HOME").ok() {
-                let tf_plugins = PathBuf::from(home).join(".terraform.d/plugins");
-                if !tf_plugins.exists() {
-                    let _ = std::fs::create_dir_all(&tf_plugins);
-                }
-                copy_dir_contents(plugins_path, &tf_plugins)?;
+        if self.manifest.overwrite {
+            if let Some(generic) = generic_unit_path {
+                plan.push(MaterializationStep::CopyDir {
+                    src: generic.to_path_buf(),
+                    dst: self.temp_folder.clone(),
+                });
             }
         }
 
-        // Copy unit files to temp folder
-        if self.unit_path.exists() {
-            copy_dir_contents(&self.unit_path, dest)?;
-        }
+        plan.push(MaterializationStep::CopyDir {
+            src: self.unit_path.clone(),
+            dst: self.temp_folder.clone(),
+        });
 
-        // Write dimension data as cubtera_dim_{type}.json files
-        self.write_dimension_data(dest)?;
-
-        Ok(())
-    }
-
-    /// Write dimension data to temp folder as cubtera_dim_{type}.json files
-    pub fn write_dimension_data(&self, dest: &Path) -> DomainResult<()> {
         for dim_ref in &self.dimensions {
             let dim_type = dim_ref.dim_type.as_str();
-            let dim_name = &dim_ref.name;
-
-            // Build the dimension vars JSON
-            let mut vars = serde_json::Map::new();
-            vars.insert(
-                format!("dim_{}_name", dim_type),
-                Value::String(dim_name.clone()),
-            );
-
-            // Add dimension data if available
-            if let Some(data) = self.dimension_data.get(dim_type) {
-                // Flatten data into dim_{type}_{key} format
-                if let Some(obj) = data.as_object() {
-                    for (key, value) in obj {
-                        vars.insert(format!("dim_{}_{}", dim_type, key), value.clone());
-                    }
-                }
-                // Also add the full data as dim_{type}_meta
-                vars.insert(format!("dim_{}_meta", dim_type), data.clone());
-            }
-
-            // Write to file
-            let filename = format!("cubtera_dim_{}.json", dim_type);
-            let filepath = dest.join(&filename);
-            let json_content = serde_json::to_string_pretty(&Value::Object(vars))
-                .map_err(|e| DomainError::io(format!("Failed to serialize dimension data: {}", e)))?;
-
-            std::fs::write(&filepath, json_content)
-                .map_err(|e| DomainError::io(format!("Failed to write dimension file {:?}: {}", filepath, e)))?;
+            plan.push(MaterializationStep::WriteFile {
+                path: self
+                    .temp_folder
+                    .join(format!("cubtera_dim_{dim_type}.json")),
+                content: dim_vars_json(dim_type, &dim_ref.name, self.dimension_data.get(dim_type)),
+            });
         }
 
-        Ok(())
+        // v1 parity: every declared-but-unprovided optional dimension still
+        // gets a placeholder file with a null name, so unit code can
+        // unconditionally reference `dim_{type}_name` without an `optDims`
+        // it happens not to need this time producing a missing-var error.
+        if let Some(opt_dims) = &self.manifest.opt_dims {
+            for dim_type in opt_dims {
+                if self
+                    .dimensions
+                    .iter()
+                    .any(|d| d.dim_type.as_str() == dim_type.as_str())
+                {
+                    continue;
+                }
+                plan.push(MaterializationStep::WriteFile {
+                    path: self
+                        .temp_folder
+                        .join(format!("cubtera_dim_{dim_type}.json")),
+                    content: dim_vars_json_null(dim_type),
+                });
+            }
+        }
+
+        for include in &self.includes {
+            let dst = self.temp_folder.join(&include.name);
+            if include.is_dir {
+                plan.push(MaterializationStep::CopyDir {
+                    src: include.source.clone(),
+                    dst,
+                });
+            } else {
+                plan.push(MaterializationStep::CopyFile {
+                    src: include.source.clone(),
+                    dst,
+                    required: true,
+                });
+            }
+        }
+
+        if !self.extensions.is_empty() {
+            plan.push(MaterializationStep::WriteFile {
+                path: self.temp_folder.join("cubtera_ext.json"),
+                content: extensions_json(&self.extensions),
+            });
+        }
+
+        if let Some(files) = self
+            .manifest
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.files.as_ref())
+        {
+            for (src, dst) in files.required.iter().flatten() {
+                plan.push(MaterializationStep::CopyFile {
+                    src: PathBuf::from(src),
+                    dst: self.temp_folder.join(dst),
+                    required: true,
+                });
+            }
+            for (src, dst) in files.optional.iter().flatten() {
+                plan.push(MaterializationStep::CopyFile {
+                    src: PathBuf::from(src),
+                    dst: self.temp_folder.join(dst),
+                    required: false,
+                });
+            }
+        }
+
+        plan
     }
 }
 
-/// Copy directory contents recursively
-fn copy_dir_contents(src: &Path, dst: &Path) -> DomainResult<()> {
-    if !dst.exists() {
-        std::fs::create_dir_all(dst).map_err(|e| {
-            DomainError::io(format!("Failed to create directory {:?}: {}", dst, e))
-        })?;
+/// Build the `cubtera_dim_{type}.json` content for a resolved dimension:
+/// `dim_{type}_name`, `dim_{type}_{field}` for every field in its data, and
+/// the full data blob under `dim_{type}_meta`.
+fn dim_vars_json(dim_type: &str, dim_name: &str, data: Option<&Value>) -> String {
+    let mut vars = serde_json::Map::new();
+    vars.insert(
+        format!("dim_{dim_type}_name"),
+        Value::String(dim_name.to_string()),
+    );
+
+    if let Some(data) = data {
+        if let Some(obj) = data.as_object() {
+            for (key, value) in obj {
+                vars.insert(format!("dim_{dim_type}_{key}"), value.clone());
+            }
+        }
+        vars.insert(format!("dim_{dim_type}_meta"), data.clone());
     }
 
-    for entry in std::fs::read_dir(src).map_err(|e| {
-        DomainError::io(format!("Failed to read directory {:?}: {}", src, e))
-    })? {
-        let entry = entry.map_err(|e| {
-            DomainError::io(format!("Failed to read directory entry: {}", e))
-        })?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
+    serde_json::to_string_pretty(&Value::Object(vars)).unwrap_or_default()
+}
 
-        if src_path.is_dir() {
-            copy_dir_contents(&src_path, &dst_path)?;
-        } else {
-            std::fs::copy(&src_path, &dst_path).map_err(|e| {
-                DomainError::io(format!(
-                    "Failed to copy {:?} to {:?}: {}",
-                    src_path, dst_path, e
-                ))
-            })?;
+/// Placeholder `cubtera_dim_{type}.json` content for a declared-but-unprovided
+/// optional dimension type.
+fn dim_vars_json_null(dim_type: &str) -> String {
+    let mut vars = serde_json::Map::new();
+    vars.insert(format!("dim_{dim_type}_name"), Value::Null);
+    serde_json::to_string_pretty(&Value::Object(vars)).unwrap_or_default()
+}
+
+/// Build `cubtera_ext.json` content: `ext_{type}_name` for each `type:name` extension.
+fn extensions_json(extensions: &[String]) -> String {
+    let mut vars = serde_json::Map::new();
+    for ext in extensions {
+        if let Some((ext_type, ext_name)) = ext.split_once(':') {
+            vars.insert(
+                format!("ext_{ext_type}_name"),
+                Value::String(ext_name.to_string()),
+            );
         }
     }
-    Ok(())
+    serde_json::to_string_pretty(&Value::Object(vars)).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::RunnerType;
+    use serde_json::json;
     use std::path::PathBuf;
 
     fn create_test_manifest() -> Manifest {
         Manifest::new(
             vec!["dome".to_string(), "env".to_string(), "dc".to_string()],
-            RunnerType::Terraform,
+            "tf",
         )
     }
 
@@ -349,10 +395,7 @@ mod tests {
             .with_dimension(DimensionRef::new("env", "prod"))
             .with_dimension(DimensionRef::new("dc", "us-east-1"));
 
-        assert_eq!(
-            unit.state_path(),
-            "dome:prod/env:prod/dc:us-east-1/network"
-        );
+        assert_eq!(unit.state_path(), "dome:prod/env:prod/dc:us-east-1/network");
     }
 
     #[test]
@@ -414,5 +457,227 @@ mod tests {
             .with_temp_folder("/nonexistent/path/that/does/not/exist");
         assert!(!unit.temp_folder_exists());
     }
-}
 
+    fn base_unit() -> Unit {
+        Unit::new("network", "cubtera", create_test_manifest())
+            .with_unit_path("/units/network")
+            .with_temp_folder("/tmp/cubtera/network")
+    }
+
+    #[test]
+    fn materialize_symlinks_modules_and_copies_unit_files() {
+        let unit = base_unit();
+        let plan = unit.materialize(Path::new("/modules"), None);
+
+        assert_eq!(plan.temp_folder, PathBuf::from("/tmp/cubtera/network"));
+        assert!(plan.steps.iter().any(|s| matches!(
+            s,
+            MaterializationStep::Symlink { target, link }
+                if target == Path::new("/modules") && link == Path::new("/tmp/cubtera/network/modules")
+        )));
+        assert!(plan.steps.iter().any(|s| matches!(
+            s,
+            MaterializationStep::CopyDir { src, dst }
+                if src == Path::new("/units/network") && dst == Path::new("/tmp/cubtera/network")
+        )));
+    }
+
+    #[test]
+    fn materialize_copies_generic_unit_when_overwrite_is_set() {
+        let mut manifest = create_test_manifest();
+        manifest.overwrite = true;
+        let unit = Unit::new("network", "cubtera", manifest)
+            .with_unit_path("/units/network")
+            .with_temp_folder("/tmp/cubtera/network");
+
+        let plan = unit.materialize(Path::new("/modules"), Some(Path::new("/units/_generic")));
+
+        let generic_copy_index = plan.steps.iter().position(|s| {
+            matches!(
+                s,
+                MaterializationStep::CopyDir { src, .. } if src == Path::new("/units/_generic")
+            )
+        });
+        let own_copy_index = plan.steps.iter().position(|s| {
+            matches!(
+                s,
+                MaterializationStep::CopyDir { src, .. } if src == Path::new("/units/network")
+            )
+        });
+        // The unit's own files must be copied after the generic ones, so they win on conflicts.
+        assert!(generic_copy_index.unwrap() < own_copy_index.unwrap());
+    }
+
+    #[test]
+    fn materialize_writes_flattened_dim_vars_json_per_resolved_dimension() {
+        let unit = base_unit()
+            .with_dimension(DimensionRef::new("env", "prod"))
+            .with_dimension_data("env", json!({"region": "us-east-1"}));
+
+        let plan = unit.materialize(Path::new("/modules"), None);
+
+        let content = plan
+            .steps
+            .iter()
+            .find_map(|s| match s {
+                MaterializationStep::WriteFile { path, content }
+                    if path == Path::new("/tmp/cubtera/network/cubtera_dim_env.json") =>
+                {
+                    Some(content)
+                }
+                _ => None,
+            })
+            .expect("cubtera_dim_env.json step");
+        let parsed: Value = serde_json::from_str(content).unwrap();
+        assert_eq!(parsed["dim_env_name"], "prod");
+        assert_eq!(parsed["dim_env_region"], "us-east-1");
+        assert_eq!(parsed["dim_env_meta"]["region"], "us-east-1");
+    }
+
+    #[test]
+    fn materialize_writes_null_placeholder_for_unprovided_opt_dim() {
+        let mut manifest = create_test_manifest();
+        manifest.opt_dims = Some(vec!["region".to_string()]);
+        let unit = Unit::new("network", "cubtera", manifest)
+            .with_unit_path("/units/network")
+            .with_temp_folder("/tmp/cubtera/network");
+
+        let plan = unit.materialize(Path::new("/modules"), None);
+
+        let content = plan
+            .steps
+            .iter()
+            .find_map(|s| match s {
+                MaterializationStep::WriteFile { path, content }
+                    if path == Path::new("/tmp/cubtera/network/cubtera_dim_region.json") =>
+                {
+                    Some(content)
+                }
+                _ => None,
+            })
+            .expect("cubtera_dim_region.json placeholder step");
+        let parsed: Value = serde_json::from_str(content).unwrap();
+        assert!(parsed["dim_region_name"].is_null());
+    }
+
+    #[test]
+    fn materialize_skips_opt_dim_placeholder_when_dimension_is_provided() {
+        let mut manifest = create_test_manifest();
+        manifest.opt_dims = Some(vec!["dome".to_string()]);
+        let unit = Unit::new("network", "cubtera", manifest)
+            .with_unit_path("/units/network")
+            .with_temp_folder("/tmp/cubtera/network")
+            .with_dimension(DimensionRef::new("dome", "prod"));
+
+        let plan = unit.materialize(Path::new("/modules"), None);
+
+        let dome_writes = plan
+            .steps
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s,
+                    MaterializationStep::WriteFile { path, .. }
+                        if path == Path::new("/tmp/cubtera/network/cubtera_dim_dome.json")
+                )
+            })
+            .count();
+        assert_eq!(
+            dome_writes, 1,
+            "should not double-write a provided dimension"
+        );
+    }
+
+    #[test]
+    fn materialize_copies_dimension_includes() {
+        let unit = base_unit().with_includes(vec![
+            IncludeEntry {
+                name: "keys".to_string(),
+                source: PathBuf::from("/inventory/env/prod:keys"),
+                is_dir: true,
+            },
+            IncludeEntry {
+                name: "cert.pem".to_string(),
+                source: PathBuf::from("/inventory/env/prod:cert.pem"),
+                is_dir: false,
+            },
+        ]);
+
+        let plan = unit.materialize(Path::new("/modules"), None);
+
+        assert!(plan.steps.iter().any(|s| matches!(
+            s,
+            MaterializationStep::CopyDir { src, dst }
+                if src == Path::new("/inventory/env/prod:keys")
+                    && dst == Path::new("/tmp/cubtera/network/keys")
+        )));
+        assert!(plan.steps.iter().any(|s| matches!(
+            s,
+            MaterializationStep::CopyFile { src, dst, required: true }
+                if src == Path::new("/inventory/env/prod:cert.pem")
+                    && dst == Path::new("/tmp/cubtera/network/cert.pem")
+        )));
+    }
+
+    #[test]
+    fn materialize_writes_ext_json_only_when_extensions_present() {
+        let without_ext = base_unit();
+        let plan = without_ext.materialize(Path::new("/modules"), None);
+        assert!(!plan.steps.iter().any(|s| matches!(
+            s,
+            MaterializationStep::WriteFile { path, .. }
+                if path == Path::new("/tmp/cubtera/network/cubtera_ext.json")
+        )));
+
+        let with_ext = base_unit().with_extensions(vec!["index:0".to_string()]);
+        let plan = with_ext.materialize(Path::new("/modules"), None);
+        let content = plan
+            .steps
+            .iter()
+            .find_map(|s| match s {
+                MaterializationStep::WriteFile { path, content }
+                    if path == Path::new("/tmp/cubtera/network/cubtera_ext.json") =>
+                {
+                    Some(content)
+                }
+                _ => None,
+            })
+            .expect("cubtera_ext.json step");
+        let parsed: Value = serde_json::from_str(content).unwrap();
+        assert_eq!(parsed["ext_index_name"], "0");
+    }
+
+    #[test]
+    fn materialize_includes_manifest_spec_files() {
+        let mut manifest = create_test_manifest();
+        manifest.spec = Some(crate::manifest::Spec {
+            env_vars: None,
+            files: Some(crate::manifest::Files {
+                required: Some(HashMap::from([(
+                    "/etc/creds.json".to_string(),
+                    "creds.json".to_string(),
+                )])),
+                optional: Some(HashMap::from([(
+                    "~/.aws/config".to_string(),
+                    "aws_config".to_string(),
+                )])),
+            }),
+        });
+        let unit = Unit::new("network", "cubtera", manifest)
+            .with_unit_path("/units/network")
+            .with_temp_folder("/tmp/cubtera/network");
+
+        let plan = unit.materialize(Path::new("/modules"), None);
+
+        assert!(plan.steps.iter().any(|s| matches!(
+            s,
+            MaterializationStep::CopyFile { src, dst, required: true }
+                if src == Path::new("/etc/creds.json") && dst == Path::new("/tmp/cubtera/network/creds.json")
+        )));
+        assert!(plan.steps.iter().any(|s| matches!(
+            s,
+            MaterializationStep::CopyFile { src, dst, required: false }
+                if src == Path::new("~/.aws/config") && dst == Path::new("/tmp/cubtera/network/aws_config")
+        )));
+    }
+}

@@ -1,24 +1,27 @@
-//! Terraform runner
+//! Terraform runner strategy
 //!
-//! Implements the Runner trait with terraform-specific pipeline overrides:
-//! - copy_files: Different behavior for init vs plan/apply
-//! - change_files: Convert cubtera_*.json to .auto.tfvars.json
-//! - runner: Execute terraform with version management
+//! Implements `RunnerStrategy` with terraform-specific differences:
+//! - `prepare_mode`: require `init` to have run before plan/apply/destroy
+//! - `extend_plan`: adds `cubtera_backend.tf` (state backend HCL)
+//! - `transform_files`: converts `cubtera_*.json` to `*.auto.tfvars.json`
+//! - `execute`: wraps `init` in a TCP-port lock (prevents parallel inits
+//!   racing on the terraform plugin cache)
 
 use async_trait::async_trait;
 use cubtera_core::error::{AppError, AppResult};
-use cubtera_core::ports::{CopyConfig, RunContext, Runner};
-use cubtera_domain::{RunParams, Unit};
+use cubtera_core::ports::{
+    merged_env, CopyConfig, PrepareMode, ProcessRunner, ProcessSpec, RunContext, RunnerStrategy,
+};
+use cubtera_domain::{MaterializationPlan, MaterializationStep, RunParams, Unit};
 use serde_json::{json, Value};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::Duration;
 use tracing::{debug, info};
 
 use super::switch as tfswitch;
 
-/// Terraform runner with version management
+/// Terraform runner strategy with version management
 pub struct TerraformRunner {
     /// Default terraform version
     version: Option<String>,
@@ -27,7 +30,7 @@ pub struct TerraformRunner {
 }
 
 impl TerraformRunner {
-    /// Create a new Terraform runner
+    /// Create a new Terraform strategy
     pub fn new(version: Option<String>) -> Self {
         Self {
             version,
@@ -41,15 +44,155 @@ impl TerraformRunner {
         self
     }
 
-    /// Get the terraform binary path, downloading if necessary
-    async fn get_binary_path(&self, params: &RunParams) -> AppResult<PathBuf> {
-        // Check if custom runner_command is specified in params
+    /// Check if command is "init"
+    fn is_init_command(params: &RunParams) -> bool {
+        params.command.first().map(|s| s.as_str()) == Some("init")
+    }
+
+    /// Acquire lock for init command (blocking - run via `spawn_blocking`)
+    fn acquire_init_lock(lock_port: u16) -> TcpListener {
+        loop {
+            match TcpListener::bind(("127.0.0.1", lock_port)) {
+                Ok(listener) => return listener,
+                Err(_) => {
+                    info!("Waiting for init lock (port {})...", lock_port);
+                    let delay = rand::random::<u64>() % 400 + 800;
+                    std::thread::sleep(Duration::from_millis(delay));
+                }
+            }
+        }
+    }
+
+    /// Build TF_VAR_* environment variables
+    fn build_tf_vars(unit: &Unit) -> Vec<(String, String)> {
+        vec![
+            ("TF_VAR_org_name".to_string(), unit.org.clone()),
+            ("TF_VAR_unit_name".to_string(), unit.name.clone()),
+            ("TF_VAR_dim_tree".to_string(), unit.dim_tree()),
+        ]
+    }
+}
+
+#[async_trait]
+impl RunnerStrategy for TerraformRunner {
+    fn name(&self) -> &str {
+        "terraform"
+    }
+
+    async fn init(&self) -> AppResult<()> {
+        if let Some(version) = &self.version {
+            info!("Pre-downloading Terraform {}...", version);
+            let version = version.clone();
+            tokio::task::spawn_blocking(move || tfswitch::tf_switch(&version))
+                .await
+                .map_err(|e| AppError::runner(format!("Task join error: {}", e)))??;
+        }
+        Ok(())
+    }
+
+    fn prepare_mode(&self, params: &RunParams, copy_config: &CopyConfig) -> PrepareMode {
+        if Self::is_init_command(params) {
+            PrepareMode::CleanAndMaterialize
+        } else {
+            PrepareMode::RequireExisting {
+                rematerialize: copy_config.always_copy_files,
+            }
+        }
+    }
+
+    fn extend_plan(&self, unit: &Unit, params: &RunParams, plan: &mut MaterializationPlan) {
+        let Some(state_config) = &params.state_backend_config else {
+            debug!("No state backend config, skipping backend file");
+            return;
+        };
+
+        let tf_hcl = json!({ "terraform": { "backend": state_config } });
+        plan.push(MaterializationStep::WriteFile {
+            path: unit.temp_folder.join("cubtera_backend.tf"),
+            content: json_to_hcl(&tf_hcl, 0),
+        });
+    }
+
+    async fn transform_files(&self, unit: &Unit, ctx: &RunContext) -> AppResult<()> {
+        let temp_folder = &unit.temp_folder;
+
+        let mut entries = tokio::fs::read_dir(temp_folder)
+            .await
+            .map_err(|e| AppError::runner(format!("Failed to read temp folder: {}", e)))?;
+
+        let mut json_files: Vec<PathBuf> = Vec::new();
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| AppError::runner(format!("Failed to read temp folder entry: {}", e)))?
+        {
+            let path = entry.path();
+            let is_cubtera_json = path.is_file()
+                && path.extension().map(|e| e == "json").unwrap_or(false)
+                && path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.starts_with("cubtera_"))
+                    .unwrap_or(false)
+                && !path.to_string_lossy().contains(".auto.tfvars");
+            if is_cubtera_json {
+                json_files.push(path);
+            }
+        }
+
+        if json_files.is_empty() {
+            return Ok(());
+        }
+
+        let mut var_declarations = String::new();
+        for file in &json_files {
+            if let Ok(content) = tokio::fs::read_to_string(file).await {
+                if let Ok(json) = serde_json::from_str::<Value>(&content) {
+                    if let Some(obj) = json.as_object() {
+                        for key in obj.keys() {
+                            var_declarations.push_str(&format!(
+                                "variable \"{}\" {{\n    type        = any\n    default     = null\n    description = \"Generated by Cubtera\"\n}}\n",
+                                key
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        if !var_declarations.is_empty() {
+            let vars_path = temp_folder.join("cubtera_vars.tf");
+            tokio::fs::write(&vars_path, var_declarations)
+                .await
+                .map_err(|e| AppError::runner(format!("Failed to write vars file: {}", e)))?;
+        }
+
+        for file in &json_files {
+            let new_name = format!(
+                "{}.auto.tfvars.json",
+                file.file_stem().unwrap().to_string_lossy()
+            );
+            let new_path = temp_folder.join(new_name);
+            tokio::fs::rename(file, &new_path)
+                .await
+                .map_err(|e| AppError::runner(format!("Failed to rename file: {}", e)))?;
+        }
+
+        let _ = ctx;
+        Ok(())
+    }
+
+    async fn binary(
+        &self,
+        _unit: &Unit,
+        _ctx: &RunContext,
+        params: &RunParams,
+    ) -> AppResult<PathBuf> {
         if let Some(custom_path) = &params.runner_command {
             info!("Using custom terraform binary: {}", custom_path);
             return Ok(PathBuf::from(custom_path));
         }
 
-        // Use version from params, or from runner config, or "latest"
         let version = params
             .version
             .as_ref()
@@ -59,286 +202,96 @@ impl TerraformRunner {
 
         info!("Using Terraform version: {}", version);
 
-        // Run blocking tfswitch in a separate thread to avoid runtime conflicts
         tokio::task::spawn_blocking(move || tfswitch::tf_switch(&version))
             .await
             .map_err(|e| AppError::runner(format!("Task join error: {}", e)))?
     }
 
-    /// Acquire lock for init command
-    fn acquire_init_lock(&self) -> Option<TcpListener> {
-        let delay = rand::random::<u64>() % 400 + 800;
-
-        loop {
-            match TcpListener::bind(("127.0.0.1", self.lock_port)) {
-                Ok(listener) => return Some(listener),
-                Err(_) => {
-                    info!("Waiting for init lock (port {})...", self.lock_port);
-                    std::thread::sleep(Duration::from_millis(delay));
-                }
-            }
-        }
-    }
-
-    /// Check if command is "init"
-    fn is_init_command(params: &RunParams) -> bool {
-        params.command.first().map(|s| s.as_str()) == Some("init")
-    }
-
-    /// Create state backend HCL file
-    fn create_state_backend(&self, unit: &Unit, params: &RunParams) -> AppResult<()> {
-        let state_config = match &params.state_backend_config {
-            Some(config) => config.clone(),
-            None => {
-                debug!("No state backend config, skipping backend file creation");
-                return Ok(());
-            }
-        };
-
-        let tf_hcl = json!({
-            "terraform": {
-                "backend": state_config
-            }
-        });
-
-        let path = unit.temp_folder.join("cubtera_backend.tf");
-        let hcl_content = json_to_hcl(&tf_hcl, 0);
-        std::fs::write(&path, hcl_content)
-            .map_err(|e| AppError::runner(format!("Failed to write state backend: {}", e)))?;
-
-        debug!("Created state backend file: {}", path.display());
-        Ok(())
-    }
-
-    /// Build TF_VAR_* environment variables
-    fn build_tf_vars(&self, unit: &Unit) -> Vec<(String, String)> {
-        let mut vars = Vec::new();
-
-        // Standard cubtera variables
-        vars.push(("TF_VAR_org_name".to_string(), unit.org.clone()));
-        vars.push(("TF_VAR_unit_name".to_string(), unit.name.clone()));
-        vars.push(("TF_VAR_dim_tree".to_string(), unit.dim_tree()));
-
-        vars
-    }
-}
-
-#[async_trait]
-impl Runner for TerraformRunner {
-    fn name(&self) -> &str {
-        "terraform"
-    }
-
-    /// Step 1: Copy files - different behavior for init vs other commands
-    async fn copy_files(
+    async fn build_args(
         &self,
-        unit: &Unit,
+        _unit: &Unit,
+        _ctx: &RunContext,
         params: &RunParams,
-        ctx: &mut RunContext,
-        copy_config: &CopyConfig,
-    ) -> AppResult<()> {
-        let is_init = Self::is_init_command(params);
+    ) -> AppResult<Vec<String>> {
+        let mut args = params.command.clone();
 
-        if is_init {
-            // init: Remove temp folder and copy fresh
-            info!("Preparing temp folder for init: {}", unit.temp_folder.display());
-
-            unit.remove_temp_folder()
-                .map_err(|e| AppError::runner(format!("Failed to remove temp folder: {}", e)))?;
-
-            unit.copy_files_to_temp(&copy_config.modules_path, &copy_config.plugins_path)
-                .map_err(|e| AppError::runner(format!("Failed to copy files: {}", e)))?;
-
-            // Create state backend file
-            self.create_state_backend(unit, params)?;
-        } else {
-            // plan/apply/destroy: Check temp folder exists
-            if !unit.temp_folder_exists() {
-                return Err(AppError::runner(format!(
-                    "Temp folder not found: {:?}. Run 'init' first.",
-                    unit.temp_folder
-                )));
-            }
-
-            // Optionally re-copy files
-            if copy_config.always_copy_files {
-                info!("Re-copying files (always_copy_files=true)");
-                unit.copy_files_to_temp(&copy_config.modules_path, &copy_config.plugins_path)
-                    .map_err(|e| AppError::runner(format!("Failed to copy files: {}", e)))?;
-                self.create_state_backend(unit, params)?;
-            }
-        }
-
-        ctx.working_dir = unit.temp_folder.clone();
-        ctx.set_metadata("copy_files", json!(if is_init { "init_copy" } else { "verified" }));
-        Ok(())
-    }
-
-    /// Step 2: Transform cubtera_*.json to .auto.tfvars.json
-    async fn change_files(
-        &self,
-        unit: &Unit,
-        _params: &RunParams,
-        ctx: &mut RunContext,
-    ) -> AppResult<()> {
-        let temp_folder = &unit.temp_folder;
-
-        // Find all cubtera_*.json files
-        let json_files: Vec<PathBuf> = std::fs::read_dir(temp_folder)
-            .map_err(|e| AppError::runner(format!("Failed to read temp folder: {}", e)))?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| {
-                p.is_file()
-                    && p.extension().map(|e| e == "json").unwrap_or(false)
-                    && p.file_stem()
-                        .and_then(|s| s.to_str())
-                        .map(|s| s.starts_with("cubtera_"))
-                        .unwrap_or(false)
-                    && !p.to_string_lossy().contains(".auto.tfvars")
-            })
-            .collect();
-
-        if json_files.is_empty() {
-            ctx.set_metadata("change_files", json!("no_files"));
-            return Ok(());
-        }
-
-        // Generate variable declarations
-        let mut var_declarations = String::new();
-        for file in &json_files {
-            if let Ok(content) = std::fs::read_to_string(file) {
-                if let Ok(json) = serde_json::from_str::<Value>(&content) {
-                    if let Some(obj) = json.as_object() {
-                        for key in obj.keys() {
-                            var_declarations.push_str(&format!(
-                                r#"variable "{}" {{
-    type        = any
-    default     = null
-    description = "Generated by Cubtera"
-}}
-"#,
-                                key
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Write cubtera_vars.tf
-        if !var_declarations.is_empty() {
-            let vars_path = temp_folder.join("cubtera_vars.tf");
-            std::fs::write(&vars_path, var_declarations)
-                .map_err(|e| AppError::runner(format!("Failed to write vars file: {}", e)))?;
-        }
-
-        // Rename .json to .auto.tfvars.json
-        for file in &json_files {
-            let new_name = format!(
-                "{}.auto.tfvars.json",
-                file.file_stem().unwrap().to_string_lossy()
-            );
-            let new_path = temp_folder.join(new_name);
-            std::fs::rename(file, &new_path)
-                .map_err(|e| AppError::runner(format!("Failed to rename file: {}", e)))?;
-        }
-
-        ctx.set_metadata("change_files", json!({"converted": json_files.len()}));
-        Ok(())
-    }
-
-    /// Step 4: Execute terraform command
-    async fn runner(
-        &self,
-        unit: &Unit,
-        params: &RunParams,
-        ctx: &mut RunContext,
-    ) -> AppResult<()> {
-        // Get terraform binary
-        let tf_path = self.get_binary_path(params).await?;
-
-        // Check if this is an init command - needs locking
-        let is_init = Self::is_init_command(params);
-        let _lock = if is_init {
-            self.acquire_init_lock()
-        } else {
-            None
-        };
-
-        let mut cmd = Command::new(&tf_path);
-        cmd.current_dir(&ctx.working_dir);
-
-        // Add command arguments
-        for arg in &params.command {
-            cmd.arg(arg);
-        }
-
-        // Add auto-approve for apply/destroy
         if params.auto_approve {
             let has_apply_or_destroy = params
                 .command
                 .iter()
                 .any(|c| c == "apply" || c == "destroy");
             if has_apply_or_destroy {
-                cmd.arg("-auto-approve");
+                args.push("-auto-approve".to_string());
             }
         }
 
-        // Add extra args if specified
         if let Some(extra_args) = &params.extra_args {
-            for arg in extra_args.split_whitespace() {
-                cmd.arg(arg);
-            }
+            args.extend(extra_args.split_whitespace().map(String::from));
         }
 
-        // Add TF-specific environment variables
-        cmd.env("TF_IN_AUTOMATION", "true");
-        cmd.env("TF_INPUT", "0");
+        Ok(args)
+    }
 
-        // Add cubtera TF_VAR_* variables
-        for (key, value) in self.build_tf_vars(unit) {
-            cmd.env(key, value);
-        }
+    fn env_vars(&self, unit: &Unit, _params: &RunParams) -> Vec<(String, String)> {
+        let mut env = vec![
+            ("TF_IN_AUTOMATION".to_string(), "true".to_string()),
+            ("TF_INPUT".to_string(), "0".to_string()),
+        ];
+        env.extend(Self::build_tf_vars(unit));
+        env
+    }
 
-        // Add user-specified environment variables
-        for (key, value) in &params.env_vars {
-            cmd.env(key, value);
-        }
+    async fn execute(
+        &self,
+        unit: &Unit,
+        params: &RunParams,
+        ctx: &mut RunContext,
+        process: &dyn ProcessRunner,
+    ) -> AppResult<()> {
+        let program = self.binary(unit, ctx, params).await?;
+        let args = self.build_args(unit, ctx, params).await?;
+        let env = merged_env(self.env_vars(unit, params), params);
+
+        // Init needs exclusive access to the shared plugin cache; other
+        // commands don't touch it and run unlocked.
+        let is_init = Self::is_init_command(params);
+        let _lock = if is_init {
+            let lock_port = self.lock_port;
+            Some(
+                tokio::task::spawn_blocking(move || Self::acquire_init_lock(lock_port))
+                    .await
+                    .map_err(|e| AppError::runner(format!("Lock task join error: {}", e)))?,
+            )
+        } else {
+            None
+        };
 
         info!(
             "Executing: {} {} (in {})",
-            tf_path.display(),
-            params.command.join(" "),
+            program.display(),
+            args.join(" "),
             ctx.working_dir.display()
         );
 
-        // Execute with inherited stdio for interactive output
-        let status = cmd
-            .status()
-            .map_err(|e| AppError::runner(format!("Failed to execute terraform: {}", e)))?;
+        let spec = ProcessSpec {
+            program: program.clone(),
+            args: args.clone(),
+            working_dir: ctx.working_dir.clone(),
+            env,
+        };
+        let output = process.exec(&spec).await?;
 
-        let exit_code = status.code().unwrap_or(-1);
-        ctx.exit_code = Some(exit_code);
-        ctx.set_metadata("runner", json!({
-            "binary": tf_path.display().to_string(),
-            "command": params.command,
-            "exit_code": exit_code
-        }));
+        ctx.exit_code = Some(output.exit_code);
+        ctx.set_metadata(
+            "runner",
+            json!({
+                "binary": program.display().to_string(),
+                "command": args,
+                "exit_code": output.exit_code
+            }),
+        );
 
-        // Lock is automatically released here when _lock goes out of scope
-        Ok(())
-    }
-
-    async fn init(&self) -> AppResult<()> {
-        // Pre-download terraform if version is known
-        if let Some(version) = &self.version {
-            info!("Pre-downloading Terraform {}...", version);
-            let version = version.clone();
-            tokio::task::spawn_blocking(move || tfswitch::tf_switch(&version))
-                .await
-                .map_err(|e| AppError::runner(format!("Task join error: {}", e)))??;
-        }
+        // Lock is released here when `_lock` goes out of scope
         Ok(())
     }
 }
@@ -353,7 +306,6 @@ fn json_to_hcl(json: &Value, indent: usize) -> String {
                 match value {
                     Value::Object(inner_map) => {
                         if key == "backend" && inner_map.len() == 1 {
-                            // Special handling for backend type
                             let (backend_type, backend_config) = inner_map.iter().next().unwrap();
                             result.push_str(&format!(
                                 "{}{}  \"{}\" {{\n",
@@ -403,5 +355,102 @@ fn json_to_hcl(json: &Value, indent: usize) -> String {
         Value::Number(n) => n.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cubtera_domain::Manifest;
+
+    fn unit() -> Unit {
+        Unit::new("network", "cubtera", Manifest::new(vec![], "tf"))
+    }
+
+    #[test]
+    fn prepare_mode_cleans_on_init() {
+        let strategy = TerraformRunner::new(None);
+        let params = RunParams::new(".").with_command("init");
+        let copy_config = CopyConfig {
+            modules_path: PathBuf::new(),
+            plugins_path: PathBuf::new(),
+            always_copy_files: false,
+            clean_cache: false,
+        };
+        assert_eq!(
+            strategy.prepare_mode(&params, &copy_config),
+            PrepareMode::CleanAndMaterialize
+        );
+    }
+
+    #[test]
+    fn prepare_mode_requires_existing_on_plan() {
+        let strategy = TerraformRunner::new(None);
+        let params = RunParams::new(".").with_command("plan");
+        let copy_config = CopyConfig {
+            modules_path: PathBuf::new(),
+            plugins_path: PathBuf::new(),
+            always_copy_files: true,
+            clean_cache: false,
+        };
+        assert_eq!(
+            strategy.prepare_mode(&params, &copy_config),
+            PrepareMode::RequireExisting {
+                rematerialize: true
+            }
+        );
+    }
+
+    #[test]
+    fn extend_plan_adds_backend_hcl_when_state_config_present() {
+        let strategy = TerraformRunner::new(None);
+        let unit = unit().with_temp_folder("/tmp/unit");
+        let params = RunParams::new(".")
+            .with_command("init")
+            .with_state_backend_config(json!({"s3": {"bucket": "my-bucket"}}));
+
+        let mut plan = MaterializationPlan::new("/tmp/unit");
+        strategy.extend_plan(&unit, &params, &mut plan);
+
+        let content = plan.steps.iter().find_map(|s| match s {
+            MaterializationStep::WriteFile { path, content }
+                if path == std::path::Path::new("/tmp/unit/cubtera_backend.tf") =>
+            {
+                Some(content)
+            }
+            _ => None,
+        });
+        assert!(content.unwrap().contains("s3"));
+    }
+
+    #[test]
+    fn extend_plan_is_noop_without_state_config() {
+        let strategy = TerraformRunner::new(None);
+        let unit = unit().with_temp_folder("/tmp/unit");
+        let params = RunParams::new(".").with_command("init");
+
+        let mut plan = MaterializationPlan::new("/tmp/unit");
+        strategy.extend_plan(&unit, &params, &mut plan);
+        assert!(plan.steps.is_empty());
+    }
+
+    #[test]
+    fn build_args_appends_auto_approve_for_apply() {
+        let strategy = TerraformRunner::new(None);
+        let unit = unit();
+        let ctx = RunContext::new(PathBuf::from("/tmp/unit"));
+        let params = RunParams::new(".")
+            .with_command("apply")
+            .with_auto_approve(true);
+
+        let args = tokio_test_block_on(strategy.build_args(&unit, &ctx, &params)).unwrap();
+        assert_eq!(args, vec!["apply", "-auto-approve"]);
+    }
+
+    fn tokio_test_block_on<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(f)
     }
 }

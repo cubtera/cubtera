@@ -11,23 +11,16 @@ pub type DomainResult<T> = Result<T, DomainError>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainError {
     /// Dimension not found
-    DimensionNotFound {
-        dim_type: String,
-        name: String,
-    },
+    DimensionNotFound { dim_type: String, name: String },
     /// Invalid dimension format
     InvalidDimensionFormat {
         input: String,
         expected: &'static str,
     },
     /// Invalid manifest
-    InvalidManifest {
-        reason: String,
-    },
+    InvalidManifest { reason: String },
     /// Missing required dimension
-    MissingRequiredDimension {
-        dim_type: String,
-    },
+    MissingRequiredDimension { dim_type: String },
     /// Dimension not allowed
     DimensionNotAllowed {
         dim_type: String,
@@ -35,21 +28,13 @@ pub enum DomainError {
         reason: String,
     },
     /// Invalid hierarchy
-    InvalidHierarchy {
-        reason: String,
-    },
+    InvalidHierarchy { reason: String },
     /// Unit not found
-    UnitNotFound {
-        name: String,
-    },
+    UnitNotFound { name: String },
     /// Runner error
-    RunnerError {
-        reason: String,
-    },
+    RunnerError { reason: String },
     /// IO/File operation error
-    IoError {
-        reason: String,
-    },
+    IoError { reason: String },
 }
 
 impl DomainError {
@@ -87,7 +72,11 @@ impl fmt::Display for DomainError {
             Self::MissingRequiredDimension { dim_type } => {
                 write!(f, "Missing required dimension: {}", dim_type)
             }
-            Self::DimensionNotAllowed { dim_type, name, reason } => {
+            Self::DimensionNotAllowed {
+                dim_type,
+                name,
+                reason,
+            } => {
                 write!(
                     f,
                     "Dimension not allowed: {}:{} - {}",
@@ -135,4 +124,3 @@ mod tests {
         assert!(err.to_string().contains("<dim_type>:<dim_name>"));
     }
 }
-

@@ -1,12 +1,29 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "packages": {
-    ".": {}
-  },
   "release-type": "rust",
   "changelog-type": "github",
   "commit-search-depth": 10,
   "release-search-depth": 5,
+  "plugins": [
+    { "type": "linked-versions", "groupName": "cubtera-v2", "components": [
+      "cubtera-domain",
+      "cubtera-core",
+      "cubtera-config",
+      "cubtera-persistence",
+      "cubtera-runners",
+      "cubtera",
+      "cubtera-api"
+    ] }
+  ],
+  "packages": {
+    "crates/cubtera-domain": { "component": "cubtera-domain" },
+    "crates/cubtera-core": { "component": "cubtera-core" },
+    "crates/cubtera-config": { "component": "cubtera-config" },
+    "crates/cubtera-persistence": { "component": "cubtera-persistence" },
+    "crates/cubtera-runners": { "component": "cubtera-runners" },
+    "crates/cubtera": { "component": "cubtera" },
+    "crates/cubtera-api": { "component": "cubtera-api" }
+  },
 
   "changelog-sections": [
     {
