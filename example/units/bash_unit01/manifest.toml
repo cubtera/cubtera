@@ -1,29 +1,26 @@
 dimensions = ["dc"]
-allow_list = ["stg1"]
-opt_dims = ["service"]
+allowList = ["env:stg1"] # allowList entries are "type:name" keys (matches any dimension in the chain, including ancestors)
+optDims = ["service"]
 type = "bash"
 
 [runner]
+# BashRunner always executes the single `*.sh` file it finds in the unit's
+# temp folder - runner_command/version/extra_args have no effect for this
+# runner type and are intentionally omitted here.
+inlet_command = "echo Inlet: preparing bash_unit01"
+outlet_command = "echo Outlet: bash_unit01 finished"
 
-inlet_command = "ls"
-outlet_command = "sleep 10"
-
-runner_command = "./test.sh"
-extra_args = "extra_args"
-
-version = "1.0.0" # not relevant for bash unit
-
-[spec.env_vars.optional]
-my_pwd = "PWD"
-
-[spec.env_vars.required]
-my_home = "HOME"
-
-[spec.files.optional]
-"$PWD/example/remote_folder/test.txt" = "test_optional.txt"
-"~/.viminfo" = "optional.txt"
-"~/.zshrc" = ".zshrc"
+# spec.env_vars is parsed into the manifest schema but not yet consumed by
+# the run pipeline (Unit::materialize only reads spec.files) - kept here,
+# commented out, purely to document the intended schema shape.
+# [spec.env_vars.optional]
+# my_pwd = "PWD"
+# [spec.env_vars.required]
+# my_home = "HOME"
 
 [spec.files.required]
-"~/.zshrc" = "required.txt"
-"./example/remote_folder/test.txt" = "remote_required.txt"
+"example/units/bash_unit01/greeting.txt" = "greeting.txt"
+
+[spec.files.optional]
+"example/remote_folder/test.txt" = "remote_optional.txt"
+"example/units/bash_unit01/does-not-exist.txt" = "skipped.txt" # demonstrates graceful skip of a missing optional include

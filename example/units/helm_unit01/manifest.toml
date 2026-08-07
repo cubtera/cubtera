@@ -1,0 +1,9 @@
+dimensions = ["dc"]
+optDims = ["service"]
+type = "helm"
+
+[runner]
+# HelmRunner always invokes the "helm" binary on PATH with whatever command
+# you pass after `--` (e.g. `-- template .`) - there's nothing to override
+# here. `helm template` never contacts a cluster, so this unit needs no
+# kubeconfig/login.

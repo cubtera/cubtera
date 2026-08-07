@@ -1,52 +1,58 @@
-[ default ] # all parameters are optional, default values are shown
-workspace_path = "example" # default => "~/.cubtera"
-temp_folder_path = "example/.cubtera/tmp" # default => "~/.cubtera/tmp"
+# Cubtera v2 config schema: a `[default]` table plus one table per org
+# (matched by name), whose fields override `[default]`'s for that org.
+# All fields are optional; values shown here are the effective defaults
+# unless noted otherwise. Keys accept either camelCase or snake_case.
 
-units_folder = "units" # default => "units"
-modules_folder = "modules" # default => "modules"
-inventory_folder = "inventory" # default => "inventory"
+[default]
+inventoryPath = "example/inventory" # default => "inventory"
+unitsPath = "example/units" # default => "units"
+modulesPath = "example/modules" # default => "modules"
+pluginsPath = "example/plugins" # default => "plugins"
+tempFolderPath = "example/.cubtera/tmp" # default => "~/.cubtera/temp"
+deploymentLogPath = "example/.cubtera/dlog" # default => "~/.cubtera/dlog" | fs-jsonl DeploymentLogRepository root, used unless [deploymentLog] below is set
 
-units_path = "example/units" # $workspace_path/$units_folder | override units_folder
-modules_path = "example/modules" # $workspace_path/$modules_folder | override modules_folder
-inventory_path = "example/inventory" # $workspace_path/$inventory_folder | override inventory_folder
+dimRelations = ["dome", "env", "dc"] # default => ["dome", "env", "dc"]
+orgs = ["cubtera", "teracub"] # known orgs; first one is used when CUBTERA_ORG isn't set
+fileNameSeparator = ":" # separator between an inventory/unit name and its section/include suffix
 
-dim_relations = "dome:env:dc" # default => "dome:env:dc" | Relations of base dimension's types (colon separated)
-orgs = "cubtera:teracub" # default => "cubtera" | List of orgs (tenants) in inventory to work with (colon separated)
+# Useful for development and CI/CD
+alwaysCopyFiles = true # default => false | copy files to the runner's temp folder even without init
+cleanCache = false # default => false | clean the runner's temp folder after a successful run
 
-# Usefull for development and CI/CD
-always_copy_files = true # default => "false" | Copy files to the runner's temp folder
-clean_cache = false # default => "false" | Clean runner's temp folder after successful run
-
-# LEGACY PARAMS (will be removed or changed in the future)
-tf_state_s3bucket = "cubtera-default-tfstate" # default => "cubtera-default-tfstate" | CHABGE TO YOUR BUCKET!
-tf_state_s3region  = "us-east-1" # default => "us-east-1" | CHANGE TO YOUR REGION!
-tf_state_key_prefix = "" # default => None
-
-[ cubtera ] # optional, custom configuration for the org, overrides default parameters with the same name
+[cubtera] # per-org overrides, merged on top of [default]
 # usefull for multiple orgs management in the same workspace
 
-# LEGACY PARAMS (will be removed or changed in the future)
-tf_state_s3region  = "us-east-2" # default => "us-east-1" | CHANGE TO YOUR REGION!
-tf_state_s3bucket  = "cubtera-example-tfstate" # default => "cubtera-default-tfstate" | CHABGE TO YOUR BUCKET!
-tf_state_key_prefix = "cubtera/" # default => None | CHANGE TO YOUR PREFIX IF NEEDED!
-
-[cubtera.state.s3] # optional, global org configuration for the state backend of S3 type
-bucket = "{{ org }}-example-state"
-key    = "{{ dim_tree }}/{{ unit_name }}.tfstate"
+# "s3" is only here to illustrate the schema for a real cloud state backend -
+# it needs real AWS credentials at `terraform init` and no example unit uses
+# it. Every example unit either overrides `state_backend = "local"` in its
+# own manifest, or (tofu units) never gets a rendered backend file at all -
+# `OpenTofuRunner` doesn't implement `extend_plan` yet.
+[cubtera.state.s3] # global org template for the "s3" state backend; handlebars-rendered per run
+bucket = "{{org}}-example-state"
+key = "{{dim_tree}}/{{unit_name}}.tfstate"
 region = "us-east-1"
 
-[cubtera.state.local] # optional, global org configuration for the state backend of local type
-path = "~/.cubtera/state/{{ org }}/{{ dim_tree }}/{{ unit_name }}.tfstate"
+[cubtera.state.local] # global org template for the "local" state backend
+path = "~/.cubtera/state/{{org}}/{{dim_tree}}/{{unit_name}}.tfstate"
 
-[cubtera.runner.tf] # optional, custom configuration for the runner of Terraform type
-state_backend = "s3" # or "local", default is S3 for tf runner
+[cubtera.runner.tf] # global defaults for the "tf" runner; a unit's own manifest.runner overrides these
+state_backend = "local" # used when the unit manifest doesn't set its own [state] table - "local" keeps the example credential-free by default
 
-inlet_command = "echo Inlet command" # default => None, will run command before runner starts, in temp folder context
-outlet_command = "echo Outlet command" # default => None, will run command after runner finishes successfully, in temp folder context
+inlet_command = "echo Inlet command" # runs before the runner starts, in temp folder context
+outlet_command = "echo Outlet command" # runs after the runner finishes successfully, in temp folder context
 
-# version = "1.7.0" # default => latest, will be ignored if runner_command is set, will be latest if bot are not set
-# runner_command = "terraform" # default => None, will run command with the runner
-# extra_params = "-json" # default => None, will add extra params to the runner_command
+# version = "1.7.0" # default => latest; ignored if runner_command is set
+# runner_command = "terraform" # default => None; run this binary instead of the built-in tfswitch resolution
+# extra_args = "-json" # default => None; extra CLI args appended to the runner command
 
-[cubtera.runner.bash]
-runner_command = "./runner.sh"
+# BashRunner always executes the single `*.sh` file it finds in the unit's
+# temp folder - it ignores `runner_command`/`version`/`extra_args` entirely,
+# so there's no meaningful `[cubtera.runner.bash]` override to set here.
+
+# Uncomment to switch DeploymentLogRepository from fs-jsonl (deploymentLogPath
+# above) to MongoDB - all orgs share this database/collection, distinguished
+# by each entry's own "org" field.
+# [cubtera.deploymentLog]
+# connectionString = "mongodb://localhost:27017" # required
+# database = "cubtera" # default => "cubtera"
+# collection = "deployments" # default => "deployments"

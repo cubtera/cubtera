@@ -1,18 +1,17 @@
 dimensions = ["dc"]
-allowList = ["stg1"]
+allowList = ["dc:stg1-use2"] # allowList entries are "type:name" keys
 type = "tf"
 
-[spec.env_vars.optional]
-change_nat_ips = "CHANGE_NAT_IPS"
-
-[spec.env_vars.required]
-my_home = "PWD"
+# spec.env_vars is parsed into the manifest schema but not yet consumed by
+# the run pipeline (Unit::materialize only reads spec.files) - kept here,
+# commented out, purely to document the intended schema shape.
+# [spec.env_vars.optional]
+# change_nat_ips = "CHANGE_NAT_IPS"
+# [spec.env_vars.required]
+# my_home = "PWD"
 
 [spec.files.optional]
-"~/main.tf" = "test_optional.txt"
-
-#[spec.files.required]
-#"main.tf" = "test_required.txt"
+"example/units/tf_unit02/greeting.txt" = "greeting.txt" # project-relative include, copied verbatim into the temp folder
 
 #[state] # optional, override global state backend configuration
 

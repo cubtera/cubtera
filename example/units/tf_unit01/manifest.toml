@@ -1,11 +1,12 @@
 dimensions = ["dome"]
-allowList = ["mgmt", "stg"]
+allowList = ["dome:mgmt", "dome:stg"] # allowList entries are "type:name" keys (matches any dimension in the chain, including ancestors)
 type = "tofu"
 
 [runner]
 state_backend = "local" # state backend for the runner defined in config.toml, default is local
-runner_command =  "~/Downloads/tofu/tofu" # if defined - version will be ignored
 
-# extra_args = "--auto-approve" # default => None | extra arguments for the runner_command
-inlet_command = "~/Downloads/tofu/tofu version" # default => None, will run command before runner_command starts, in temp folder context
+# OpenTofuRunner always invokes the "tofu" binary on PATH - it doesn't read
+# runner_command/version (no tofuswitch yet), so there's nothing to override
+# here beyond inlet/outlet hooks.
+inlet_command = "tofu version" # default => None, will run command before runner_command starts, in temp folder context
 # outlet_command = "" # default => None, will run command after runner_command finishes successfully, in temp folder context

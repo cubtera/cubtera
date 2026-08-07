@@ -1,0 +1,9 @@
+apiVersion: v2
+name: cubtera-example
+description: >-
+  Minimal chart for cubtera's helm_unit01 example. Demonstrates HelmRunner's
+  values.yaml.tpl -> values.yaml rendering with dimension data; `helm
+  template` never touches a real cluster, so this runs with zero credentials.
+type: application
+version: 0.1.0
+appVersion: "1.0"
