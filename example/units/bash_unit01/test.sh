@@ -37,4 +37,19 @@ else
 fi
 echo
 
+echo "--- inventory dc includes (from example/inventory/cubtera/dc) ---"
+echo "readme.txt (default-only, no per-dim override):"
+cat readme.txt
+echo "notice.txt (dim-specific override wins over .default:notice.txt):"
+cat notice.txt
+echo "shared/info.txt (default-only folder, copied for every dc dimension):"
+cat shared/info.txt
+echo "extra/token.txt (dim-specific folder, only present for dc dims that ship one):"
+if [ -f extra/token.txt ]; then
+  cat extra/token.txt
+else
+  echo "(missing, as expected - this dc dimension has no extra/ folder)"
+fi
+echo
+
 echo "=== done ==="

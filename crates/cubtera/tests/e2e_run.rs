@@ -92,6 +92,60 @@ fn bash_unit_runs_and_prints_resolved_dimension_data() {
 }
 
 #[test]
+fn bash_unit_merges_dc_includes_from_defaults_and_own_dimension() {
+    // example/inventory/cubtera/dc ships:
+    //  - .default:readme.txt / .default:notice.txt / .default:shared/ (every dc dim)
+    //  - stg1-use2:notice.txt (overrides the default notice)
+    //  - stg1-use2:extra/ (only this dc dim has it)
+    let temp_path = fresh_temp_dir();
+    let output = cli(&temp_path)
+        .args([
+            "run",
+            "-u",
+            "bash_unit01",
+            "-d",
+            "dc:stg1-use2",
+            "--",
+            "deploy",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
+
+    // Default-only file: no per-dim override, so the default content survives.
+    assert!(
+        stdout.contains("Default dc readme - present for every dc dimension"),
+        "stdout: {stdout}"
+    );
+    // Same-named file exists in both .default and stg1-use2 - the
+    // dimension's own copy must win on disk.
+    assert!(
+        stdout.contains("stg1-use2's own notice - it overrides the default"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("This is the default notice for any dc dimension"),
+        "default notice.txt should have been overwritten by stg1-use2's own copy\nstdout: {stdout}"
+    );
+    // Default-only folder: contents are copied too, not just default files.
+    assert!(
+        stdout.contains("Shared default info folder"),
+        "stdout: {stdout}"
+    );
+    // Dimension-specific folder (no default equivalent).
+    assert!(
+        stdout.contains("stg1-use2 dim-specific extra file"),
+        "stdout: {stdout}"
+    );
+
+    let temp_folder = temp_folder_from_stdout(&stdout);
+    assert!(temp_folder.join("readme.txt").exists());
+    assert!(temp_folder.join("notice.txt").exists());
+    assert!(temp_folder.join("shared/info.txt").exists());
+    assert!(temp_folder.join("extra/token.txt").exists());
+}
+
+#[test]
 fn bash_unit_resolves_optional_dimension_when_supplied() {
     // "service" is an optDims entry - unlike a required dimension, it's
     // resolved the same way as any other `-d`, just not mandatory.

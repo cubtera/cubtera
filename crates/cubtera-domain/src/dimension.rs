@@ -182,6 +182,14 @@ impl Dimension {
         let dim_type = dim_type.into();
         let mut data = raw.sections;
 
+        // v1 parity (`process_dim_entries`): default includes are copied
+        // first, then the dimension's own includes, so same-named entries
+        // end up overwritten by the dimension-specific one on disk. We get
+        // the same effect here by ordering defaults before the dimension's
+        // own includes in the materialization plan - `Workspace::apply`
+        // copies file-by-file and overwrites on collision.
+        let mut includes = Vec::new();
+
         if let Some(defaults) = defaults {
             for (section, default_value) in &defaults.sections {
                 match data.get_mut(section) {
@@ -191,7 +199,9 @@ impl Dimension {
                     }
                 }
             }
+            includes.extend(defaults.includes.iter().cloned());
         }
+        includes.extend(raw.includes.iter().cloned());
 
         // "meta" always exists once assembled, even if empty.
         data.entry("meta".to_string())
@@ -216,7 +226,7 @@ impl Dimension {
             dim_type,
             name: raw.name,
             data,
-            includes: raw.includes,
+            includes,
             parent_ref,
             key_path,
             data_sha,
@@ -400,6 +410,7 @@ impl Default for DimHierarchy {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::Path;
 
     #[test]
     fn test_dim_type_creation() {
@@ -482,6 +493,56 @@ mod tests {
         let dim = Dimension::assemble("dc", raw, Some(&defaults), None);
         assert_eq!(dim.meta().unwrap()["region"], "us-east-2"); // own wins
         assert_eq!(dim.meta().unwrap()["vpc_cidr"], "10.0.0.0/16"); // gap-filled
+    }
+
+    #[test]
+    fn test_assemble_merges_default_includes_before_own_includes() {
+        let raw = RawDimension::new("stg1")
+            .with_section("meta", json!({}))
+            .with_include(IncludeEntry {
+                name: "cert.pem".to_string(),
+                source: PathBuf::from("/inventory/dc/stg1:cert.pem"),
+                is_dir: false,
+            });
+        let defaults = RawDimension::new(".default")
+            .with_section("meta", json!({}))
+            .with_include(IncludeEntry {
+                name: "cert.pem".to_string(),
+                source: PathBuf::from("/inventory/dc/.default:cert.pem"),
+                is_dir: false,
+            })
+            .with_include(IncludeEntry {
+                name: "extra".to_string(),
+                source: PathBuf::from("/inventory/dc/.default:extra"),
+                is_dir: true,
+            });
+
+        let dim = Dimension::assemble("dc", raw, Some(&defaults), None);
+
+        // Default-only include ("extra") is preserved.
+        assert!(dim.includes.iter().any(|i| {
+            i.name == "extra" && i.source == Path::new("/inventory/dc/.default:extra")
+        }));
+        // v1 parity: defaults are listed before the dimension's own includes,
+        // so the same-named entry is applied second and wins on disk.
+        let cert_positions: Vec<usize> = dim
+            .includes
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.name == "cert.pem")
+            .map(|(idx, _)| idx)
+            .collect();
+        assert_eq!(
+            cert_positions.len(),
+            2,
+            "both cert.pem entries kept, in order"
+        );
+        let last_cert = &dim.includes[*cert_positions.last().unwrap()];
+        assert_eq!(
+            last_cert.source,
+            PathBuf::from("/inventory/dc/stg1:cert.pem"),
+            "dimension's own include must be last so it wins on collision"
+        );
     }
 
     #[test]

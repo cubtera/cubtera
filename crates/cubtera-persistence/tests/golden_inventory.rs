@@ -46,6 +46,57 @@ async fn dc_own_region_wins_over_defaults() {
 }
 
 #[tokio::test]
+async fn dc_merges_default_and_own_includes_dim_specific_wins() {
+    let service = service();
+    let dim = service
+        .get_by_name("cubtera", "dc", "stg1-use2")
+        .await
+        .unwrap();
+
+    // Default-only entries (readme.txt, shared/) must survive the merge.
+    assert!(dim
+        .includes
+        .iter()
+        .any(|i| i.name == "readme.txt" && !i.is_dir));
+    assert!(dim.includes.iter().any(|i| i.name == "shared" && i.is_dir));
+    // stg1-use2-only entry, no default counterpart.
+    assert!(dim.includes.iter().any(|i| i.name == "extra" && i.is_dir));
+
+    // notice.txt exists in both .default and stg1-use2 - both entries are
+    // kept (so on-disk copy order matches v1), but the dimension's own copy
+    // must come *after* the default one so it wins when materialized.
+    let notice_positions: Vec<usize> = dim
+        .includes
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| i.name == "notice.txt")
+        .map(|(idx, _)| idx)
+        .collect();
+    assert_eq!(notice_positions.len(), 2, "includes: {:?}", dim.includes);
+    let last_notice = &dim.includes[*notice_positions.last().unwrap()];
+    assert!(
+        last_notice.source.ends_with("stg1-use2:notice.txt"),
+        "last notice.txt entry should be stg1-use2's own: {:?}",
+        last_notice.source
+    );
+}
+
+#[tokio::test]
+async fn dc_without_own_includes_only_gets_defaults() {
+    let service = service();
+    let dim = service
+        .get_by_name("cubtera", "dc", "prod-use1")
+        .await
+        .unwrap();
+
+    assert!(dim.includes.iter().any(|i| i.name == "readme.txt"));
+    assert!(dim.includes.iter().any(|i| i.name == "notice.txt"));
+    assert!(dim.includes.iter().any(|i| i.name == "shared" && i.is_dir));
+    // prod-use1 ships no includes of its own.
+    assert!(!dim.includes.iter().any(|i| i.name == "extra"));
+}
+
+#[tokio::test]
 async fn dc_resolves_full_parent_chain() {
     let service = service();
     let dim = service
