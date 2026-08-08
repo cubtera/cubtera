@@ -1,0 +1,28 @@
+[package]
+name = "cubtera-runners"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cubtera runners implementations (Terraform, OpenTofu, Bash, Helm, ...)"
+
+[dependencies]
+cubtera-domain.workspace = true
+cubtera-core.workspace = true
+
+tokio.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+handlebars.workspace = true
+
+# For tfswitch
+reqwest.workspace = true
+zip.workspace = true
+rand.workspace = true
+semver.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+

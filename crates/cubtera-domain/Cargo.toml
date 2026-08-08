@@ -1,0 +1,17 @@
+[package]
+name = "cubtera-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cubtera domain layer - business logic entities and value objects"
+
+[dependencies]
+# Minimal dependencies for domain types - all treated as data formats
+# (like String or Vec<u8>), not infrastructure concerns.
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+sha2.workspace = true
+handlebars.workspace = true
+jsonschema.workspace = true
+

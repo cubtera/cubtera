@@ -1,0 +1,1 @@
+Shared default info folder, copied for every dc dimension.

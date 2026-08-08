@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["region"],
+  "properties": {
+    "region": { "type": "string" },
+    "vpc_cidr": { "type": "string" },
+    "parent": { "type": "string" }
+  }
+}

@@ -1,0 +1,13 @@
+[package]
+name = "cubtera-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cubtera configuration loading"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+
