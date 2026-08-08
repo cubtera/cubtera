@@ -48,12 +48,12 @@ jobs:
             asset_name: cubtera-linux-intel
 
           - name: macos
-            os: macos-13
+            os: macos-15-intel
             target: x86_64-apple-darwin
             asset_name: cubtera-darwin-intel
 
           - name: macos-arm64
-            os: macos-13
+            os: macos-15
             target: aarch64-apple-darwin
             asset_name: cubtera-darwin-aarch64
             
