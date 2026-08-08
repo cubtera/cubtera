@@ -319,8 +319,10 @@ impl Unit {
 }
 
 /// Build the `cubtera_dim_{type}.json` content for a resolved dimension:
-/// `dim_{type}_name`, `dim_{type}_{field}` for every field in its data, and
-/// the full data blob under `dim_{type}_meta`.
+/// `dim_{type}_name` and `dim_{type}_{field}` for every field/section in its
+/// data (`dim_{type}_meta` is just the "meta" section, like every other
+/// section - it is NOT the full per-dimension data blob; see v1's
+/// `get_json_dim_vars`, which this mirrors).
 fn dim_vars_json(dim_type: &str, dim_name: &str, data: Option<&Value>) -> String {
     let mut vars = serde_json::Map::new();
     vars.insert(
@@ -334,7 +336,6 @@ fn dim_vars_json(dim_type: &str, dim_name: &str, data: Option<&Value>) -> String
                 vars.insert(format!("dim_{dim_type}_{key}"), value.clone());
             }
         }
-        vars.insert(format!("dim_{dim_type}_meta"), data.clone());
     }
 
     serde_json::to_string_pretty(&Value::Object(vars)).unwrap_or_default()
@@ -510,9 +511,18 @@ mod tests {
 
     #[test]
     fn materialize_writes_flattened_dim_vars_json_per_resolved_dimension() {
+        // `dimension_data` mirrors `Dimension::to_json()`: sections keyed by
+        // name (`meta` plus any other section), not a flat blob.
         let unit = base_unit()
             .with_dimension(DimensionRef::new("env", "prod"))
-            .with_dimension_data("env", json!({"region": "us-east-1"}));
+            .with_dimension_data(
+                "env",
+                json!({
+                    "name": "prod",
+                    "meta": {"region": "us-east-1"},
+                    "manifest": {"owner": "platform"}
+                }),
+            );
 
         let plan = unit.materialize(Path::new("/modules"), None);
 
@@ -530,8 +540,11 @@ mod tests {
             .expect("cubtera_dim_env.json step");
         let parsed: Value = serde_json::from_str(content).unwrap();
         assert_eq!(parsed["dim_env_name"], "prod");
-        assert_eq!(parsed["dim_env_region"], "us-east-1");
+        // `dim_env_meta` must be just the "meta" section, not the whole
+        // per-dimension data blob (that was the double-wrapping regression).
         assert_eq!(parsed["dim_env_meta"]["region"], "us-east-1");
+        assert!(parsed["dim_env_meta"].get("manifest").is_none());
+        assert_eq!(parsed["dim_env_manifest"]["owner"], "platform");
     }
 
     #[test]
