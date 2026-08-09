@@ -31,9 +31,9 @@ use async_trait::async_trait;
 use cubtera_core::error::{AppError, AppResult};
 use cubtera_core::ports::{
     entry_matches, matches_all_dimensions, DeploymentLogEntry, DeploymentLogRepository,
-    InventoryRepository,
+    InventoryRepository, UnitStateRepository,
 };
-use cubtera_domain::RawDimension;
+use cubtera_domain::{RawDimension, UnitStateKey, UnitStateRecord};
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
 use mongodb::{Client, Collection};
@@ -301,5 +301,119 @@ impl DeploymentLogRepository for MongoDeploymentLogRepository {
             .filter(|entry| matches_all_dimensions(entry, dimensions))
             .collect();
         Ok(Self::newest_first(entries, limit))
+    }
+}
+
+/// On-disk (BSON) shape for a unit state record: the same fields as
+/// [`UnitStateRecord`], plus a computed `dim_key` (== `UnitStateKey::canonical()`)
+/// that `MongoUnitStateRepository` upserts/looks-up by - a single indexed
+/// string comparison instead of an array-order-sensitive multi-field match
+/// (`dims`/`ext` arrays would otherwise need to always be inserted in the
+/// same sorted order to compare equal in a Mongo filter).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UnitStateDoc {
+    dim_key: String,
+    org: String,
+    unit: String,
+    dims: Vec<String>,
+    ext: Vec<String>,
+    outputs: Value,
+    updated_at: i64,
+}
+
+impl From<&UnitStateRecord> for UnitStateDoc {
+    fn from(record: &UnitStateRecord) -> Self {
+        Self {
+            dim_key: record.key().canonical(),
+            org: record.org.clone(),
+            unit: record.unit.clone(),
+            dims: record.dims.clone(),
+            ext: record.ext.clone(),
+            outputs: record.outputs.clone(),
+            updated_at: record.updated_at,
+        }
+    }
+}
+
+impl From<UnitStateDoc> for UnitStateRecord {
+    fn from(doc: UnitStateDoc) -> Self {
+        Self {
+            org: doc.org,
+            unit: doc.unit,
+            dims: doc.dims,
+            ext: doc.ext,
+            outputs: doc.outputs,
+            updated_at: doc.updated_at,
+        }
+    }
+}
+
+/// MongoDB-backed unit state repository: one document per published
+/// `UnitStateKey`, all orgs/units sharing a single database/collection
+/// (`config.toml`'s `[unitState]` - `database`/`collection`, defaulting to
+/// `"cubtera"`/`"unit_state"`), distinguished by each document's own
+/// `org`/`unit`/`dim_key` fields - same "shared collection, filter by
+/// fields" shape as [`MongoDeploymentLogRepository`].
+pub struct MongoUnitStateRepository {
+    collection: Collection<UnitStateDoc>,
+}
+
+impl MongoUnitStateRepository {
+    /// Connect to `connection_string` and use `database`/`collection` for
+    /// every org/unit's published state.
+    pub async fn new(
+        connection_string: &str,
+        database: &str,
+        collection: &str,
+    ) -> Result<Self, String> {
+        let client = Client::with_uri_str(connection_string)
+            .await
+            .map_err(|e| format!("Failed to connect to MongoDB: {e}"))?;
+        Ok(Self {
+            collection: client.database(database).collection(collection),
+        })
+    }
+}
+
+#[async_trait]
+impl UnitStateRepository for MongoUnitStateRepository {
+    async fn get(&self, key: &UnitStateKey) -> AppResult<Option<UnitStateRecord>> {
+        let found = self
+            .collection
+            .find_one(doc! { "dim_key": key.canonical() })
+            .await
+            .map_err(|e| AppError::repository(format!("MongoDB find_one failed: {e}")))?;
+        Ok(found.map(UnitStateRecord::from))
+    }
+
+    async fn put(&self, record: &UnitStateRecord) -> AppResult<()> {
+        let unit_state_doc = UnitStateDoc::from(record);
+        self.collection
+            .replace_one(doc! { "dim_key": &unit_state_doc.dim_key }, &unit_state_doc)
+            .upsert(true)
+            .await
+            .map_err(|e| AppError::repository(format!("MongoDB replace_one failed: {e}")))?;
+        Ok(())
+    }
+
+    async fn delete(&self, key: &UnitStateKey) -> AppResult<()> {
+        self.collection
+            .delete_one(doc! { "dim_key": key.canonical() })
+            .await
+            .map_err(|e| AppError::repository(format!("MongoDB delete_one failed: {e}")))?;
+        Ok(())
+    }
+
+    async fn list(&self, org: &str, unit: &str) -> AppResult<Vec<UnitStateRecord>> {
+        let cursor = self
+            .collection
+            .find(doc! { "org": org, "unit": unit })
+            .await
+            .map_err(|e| AppError::repository(format!("MongoDB find failed: {e}")))?;
+        let docs: Vec<UnitStateDoc> = cursor
+            .try_collect()
+            .await
+            .map_err(|e| AppError::repository(format!("MongoDB cursor failed: {e}")))?;
+        Ok(docs.into_iter().map(UnitStateRecord::from).collect())
     }
 }

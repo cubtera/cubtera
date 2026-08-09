@@ -24,3 +24,16 @@ outlet_command = "echo Outlet: bash_unit01 finished"
 [spec.files.optional]
 "example/remote_folder/test.txt" = "remote_optional.txt"
 "example/units/bash_unit01/does-not-exist.txt" = "skipped.txt" # demonstrates graceful skip of a missing optional include
+
+# Cross-unit state: read tf_unit02's published outputs (requires
+# `cubtera run -u tf_unit02 -d dc:stg1-use2 -- apply` to have run first, with
+# tf_unit02's own [outputs] publish = true). `dims`/`ext` are left unset, so
+# they're projected automatically from this unit's own resolved `dc`
+# dimension onto tf_unit02's required dimensions (also just `dc`) - see
+# `cubtera_domain::project_state_key`. `required = false` so this example
+# unit still runs standalone (e.g. in e2e tests) when tf_unit02 hasn't been
+# applied yet; a real consumer would normally leave this at its default
+# (`true`) to fail loudly on missing upstream state.
+[inputs.infra]
+unit = "tf_unit02"
+required = false

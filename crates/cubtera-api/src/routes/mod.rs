@@ -4,6 +4,7 @@ mod dimensions;
 mod dlog;
 mod health;
 mod orgs;
+mod state;
 mod units;
 
 use crate::auth::require_api_key;
@@ -43,6 +44,7 @@ fn v1_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         )
         .route("/{org}/units", get(units::list_units))
         .route("/{org}/units/{name}", get(units::get_unit))
+        .route("/{org}/units/{name}/state", get(state::get_unit_state))
         .route("/{org}/dlog", get(dlog::get_logs))
         // Auth applies to every /v1 route but not /health (used for
         // liveness probes, which shouldn't need a key) - see `crate::auth`.

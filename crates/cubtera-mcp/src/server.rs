@@ -8,8 +8,9 @@
 //! a product decision, not something this migration bundles in by default.
 
 use crate::error::to_mcp_error;
-use cubtera_core::ports::DeploymentLogRepository;
+use cubtera_core::ports::{DeploymentLogRepository, UnitStateRepository};
 use cubtera_core::services::{DimensionService, SchemaValidation, UnitService};
+use cubtera_domain::UnitStateKey;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -55,6 +56,21 @@ pub struct UnitParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct UnitStateParams {
+    /// Organization name
+    pub org: String,
+    /// Producer unit name
+    pub unit_name: String,
+    /// `type:name` dimensions the producer ran with - must match exactly
+    /// what it published, not the caller's full ancestor chain
+    #[serde(default)]
+    pub dims: Vec<String>,
+    /// `type:name` extensions the producer ran with, if any
+    #[serde(default)]
+    pub ext: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeploymentLogParams {
     /// Organization name
     pub org: String,
@@ -81,6 +97,7 @@ pub struct CubteraMcp {
     dimensions: Arc<DimensionService>,
     units: Arc<UnitService>,
     deployment_log: Arc<dyn DeploymentLogRepository>,
+    unit_state: Arc<dyn UnitStateRepository>,
     // Read by the `#[tool_handler]`-generated `ServerHandler` methods below;
     // rustc's dead-code pass doesn't see through that macro.
     #[allow(dead_code)]
@@ -93,11 +110,13 @@ impl CubteraMcp {
         dimensions: Arc<DimensionService>,
         units: Arc<UnitService>,
         deployment_log: Arc<dyn DeploymentLogRepository>,
+        unit_state: Arc<dyn UnitStateRepository>,
     ) -> Self {
         Self {
             dimensions,
             units,
             deployment_log,
+            unit_state,
             tool_router: Self::tool_router(),
         }
     }
@@ -251,6 +270,18 @@ impl CubteraMcp {
             .await
             .map_err(to_mcp_error)?;
         json_result(serde_json::json!(manifest))
+    }
+
+    #[tool(
+        description = "Get a producer unit's published outputs ([outputs] publish = true) for an exact dims/ext key - not a consumer's [inputs] projection, which only happens inside `cubtera run`"
+    )]
+    async fn get_unit_state(
+        &self,
+        Parameters(params): Parameters<UnitStateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let key = UnitStateKey::new(params.org, params.unit_name, params.dims, params.ext);
+        let record = self.unit_state.get(&key).await.map_err(to_mcp_error)?;
+        json_result(serde_json::json!(record))
     }
 
     #[tool(

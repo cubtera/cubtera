@@ -215,6 +215,36 @@ fn tf_unit_applies_and_creates_local_files() {
         .unwrap()
         .starts_with("Your pet name is: "));
 
+    // tf_unit02 declares `[outputs] publish = true`; bash_unit01 declares
+    // `[inputs.infra] unit = "tf_unit02"` with no explicit dims, so the
+    // consumer's own resolved `dc:stg1-use2` is projected onto tf_unit02's
+    // required `dc` dimension - the two units never need to agree on a key
+    // out of band, `project_state_key` derives it from the shared
+    // dimension. Run this against the same temp folder/apply (not a
+    // separate concurrent `terraform apply`) to avoid racing another
+    // terraform process on the shared provider plugin cache.
+    let bash_output = cli(&fresh_temp_dir())
+        .args([
+            "run",
+            "-u",
+            "bash_unit01",
+            "-d",
+            "dc:stg1-use2",
+            "--",
+            "deploy",
+        ])
+        .assert()
+        .success();
+    let bash_stdout = String::from_utf8(bash_output.get_output().stdout.clone()).unwrap();
+    assert!(
+        bash_stdout.contains("\"in_infra\""),
+        "expected bash_unit01 to see tf_unit02's published outputs\nstdout: {bash_stdout}"
+    );
+    assert!(
+        bash_stdout.contains("\"dim_dc_name\": \"stg1-use2\""),
+        "stdout: {bash_stdout}"
+    );
+
     cli(&temp_path)
         .args([
             "run",

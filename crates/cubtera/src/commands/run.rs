@@ -71,6 +71,7 @@ pub async fn run(config: &Config, args: RunArgs) -> Result<(), Box<dyn std::erro
         process,
         copy_config.clone(),
         Some(repos.deployment_log),
+        Some(repos.unit_state),
     );
 
     // Build unit
@@ -84,6 +85,11 @@ pub async fn run(config: &Config, args: RunArgs) -> Result<(), Box<dyn std::erro
     unit = unit.with_temp_folder(temp_folder);
 
     if args.dry_run {
+        if !unit.resolved_inputs.is_empty() {
+            println!("Resolved inputs:");
+            println!("{}", serde_json::to_string_pretty(&unit.resolved_inputs)?);
+            println!();
+        }
         let plan = unit.materialize(&copy_config.modules_path, None);
         println!("{plan}");
         return Ok(());

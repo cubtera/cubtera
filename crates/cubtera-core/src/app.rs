@@ -4,7 +4,7 @@
 
 use crate::ports::{
     CopyConfig, DeploymentLogRepository, InventoryRepository, ProcessRunner, RunnerFactory,
-    UnitRepository, Workspace,
+    UnitRepository, UnitStateRepository, Workspace,
 };
 use crate::services::{DimensionService, RunService, UnitService};
 use cubtera_domain::DimHierarchy;
@@ -33,13 +33,18 @@ impl App {
         process: Arc<dyn ProcessRunner>,
         copy_config: CopyConfig,
         deployment_log: Option<Arc<dyn DeploymentLogRepository>>,
+        unit_state: Option<Arc<dyn UnitStateRepository>>,
     ) -> Self {
         let dimensions = Arc::new(DimensionService::new(inventory_repository, dim_hierarchy));
-        let units = UnitService::new(unit_repository, dimensions.clone());
+        let mut units = UnitService::new(unit_repository, dimensions.clone());
         let mut runners = RunService::new(runner_factory, workspace, process, copy_config);
 
         if let Some(log) = deployment_log {
             runners = runners.with_deployment_log(log);
+        }
+        if let Some(store) = unit_state {
+            units = units.with_unit_state(store.clone());
+            runners = runners.with_unit_state(store);
         }
 
         Self {
@@ -59,6 +64,7 @@ pub struct AppBuilder {
     workspace: Option<Arc<dyn Workspace>>,
     process: Option<Arc<dyn ProcessRunner>>,
     deployment_log: Option<Arc<dyn DeploymentLogRepository>>,
+    unit_state: Option<Arc<dyn UnitStateRepository>>,
     copy_config: Option<CopyConfig>,
 }
 
@@ -73,6 +79,7 @@ impl AppBuilder {
             workspace: None,
             process: None,
             deployment_log: None,
+            unit_state: None,
             copy_config: None,
         }
     }
@@ -119,6 +126,12 @@ impl AppBuilder {
         self
     }
 
+    /// Set unit state repository (enables `[outputs]`/`[inputs]` publish/resolve)
+    pub fn unit_state(mut self, store: Arc<dyn UnitStateRepository>) -> Self {
+        self.unit_state = Some(store);
+        self
+    }
+
     /// Set copy config
     pub fn copy_config(mut self, config: CopyConfig) -> Self {
         self.copy_config = Some(config);
@@ -152,6 +165,7 @@ impl AppBuilder {
             process,
             copy_config,
             self.deployment_log,
+            self.unit_state,
         ))
     }
 }

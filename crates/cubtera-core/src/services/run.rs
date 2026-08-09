@@ -10,9 +10,10 @@
 use crate::error::AppResult;
 use crate::ports::{
     CopyConfig, DeploymentLogEntry, DeploymentLogRepository, PrepareMode, ProcessRunner,
-    ProcessSpec, RunContext, RunnerFactory, Workspace,
+    ProcessSpec, RunContext, RunnerFactory, RunnerStrategy, UnitStateRepository, Workspace,
 };
-use cubtera_domain::{RunParams, RunResult, Unit};
+use cubtera_domain::{RunParams, RunResult, Unit, UnitStateRecord};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,6 +24,7 @@ pub struct RunService {
     workspace: Arc<dyn Workspace>,
     process: Arc<dyn ProcessRunner>,
     deployment_log: Option<Arc<dyn DeploymentLogRepository>>,
+    unit_state: Option<Arc<dyn UnitStateRepository>>,
     copy_config: CopyConfig,
 }
 
@@ -39,6 +41,7 @@ impl RunService {
             workspace,
             process,
             deployment_log: None,
+            unit_state: None,
             copy_config,
         }
     }
@@ -46,6 +49,13 @@ impl RunService {
     /// Set deployment log repository
     pub fn with_deployment_log(mut self, log: Arc<dyn DeploymentLogRepository>) -> Self {
         self.deployment_log = Some(log);
+        self
+    }
+
+    /// Enable publishing `[outputs] publish = true` units to a unit state
+    /// store after a successful apply/destroy.
+    pub fn with_unit_state(mut self, unit_state: Arc<dyn UnitStateRepository>) -> Self {
+        self.unit_state = Some(unit_state);
         self
     }
 
@@ -89,7 +99,7 @@ impl RunService {
             success: ctx.exit_code.unwrap_or(0) == 0,
             exit_code: ctx.exit_code,
             output: None,
-            metadata: ctx.metadata,
+            metadata: ctx.metadata.clone(),
         };
 
         if let Some(log) = &self.deployment_log {
@@ -102,6 +112,29 @@ impl RunService {
                 if let Err(e) = log.save(&entry).await {
                     tracing::warn!("Failed to save deployment log: {}", e);
                 }
+            }
+        }
+
+        // Publishing is best-effort, like the deployment log above: a
+        // failure here must not turn a successful apply/destroy into a
+        // reported failure. Must run before the cleanup step below, which
+        // would otherwise delete `cubtera_outputs.json` first.
+        if result.is_success()
+            && self.should_log_command(&command)
+            && unit.manifest.publishes_outputs()
+        {
+            if let Some(store) = &self.unit_state {
+                if let Err(e) = self
+                    .publish_outputs(strategy.as_ref(), unit, &ctx, store)
+                    .await
+                {
+                    tracing::warn!("Failed to publish unit state for '{}': {}", unit.name, e);
+                }
+            } else {
+                tracing::warn!(
+                    "unit '{}' declares [outputs] publish=true but no unit state store is configured",
+                    unit.name
+                );
             }
         }
 
@@ -207,6 +240,60 @@ impl RunService {
             .unwrap_or(false)
     }
 
+    /// Publish `unit`'s outputs to `store`: let the strategy collect
+    /// `cubtera_outputs.json` (a no-op for bash/helm, which are expected to
+    /// have written it themselves during `execute`/outlet;
+    /// terraform/opentofu run `output -json` here), read it back through
+    /// the `Workspace` port, normalize it, and key it by the dimensions the
+    /// unit actually required (not every dimension/extension it happened
+    /// to be given) - see `cubtera_domain::project_state_key` for why a
+    /// consumer projects onto exactly this key.
+    async fn publish_outputs(
+        &self,
+        strategy: &dyn RunnerStrategy,
+        unit: &Unit,
+        ctx: &RunContext,
+        store: &Arc<dyn UnitStateRepository>,
+    ) -> AppResult<()> {
+        strategy
+            .collect_outputs(unit, ctx, self.process.as_ref())
+            .await?;
+
+        let outputs_path = unit.temp_folder.join("cubtera_outputs.json");
+        let Some(content) = self.workspace.read_file(&outputs_path).await? else {
+            tracing::warn!(
+                "unit '{}' declares [outputs] publish=true but {:?} was not written",
+                unit.name,
+                outputs_path
+            );
+            return Ok(());
+        };
+        let raw: Value = serde_json::from_str(&content).map_err(|e| {
+            crate::error::AppError::runner(format!("invalid cubtera_outputs.json: {e}"))
+        })?;
+        let outputs = strategy.normalize_outputs(&raw);
+
+        let dims: Vec<String> = unit
+            .dimensions
+            .iter()
+            .filter(|d| unit.manifest.is_dimension_required(d.dim_type.as_str()))
+            .map(|d| d.key())
+            .collect();
+
+        let record = UnitStateRecord {
+            org: unit.org.clone(),
+            unit: unit.name.clone(),
+            dims,
+            ext: unit.extensions.clone(),
+            outputs,
+            updated_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+        };
+        store.put(&record).await
+    }
+
     /// Create deployment log entry
     fn create_log_entry(
         &self,
@@ -245,6 +332,19 @@ mod tests {
     struct FakeWorkspace {
         applied: Mutex<Vec<MaterializationPlan>>,
         cleaned: Mutex<Vec<PathBuf>>,
+        files: Mutex<HashMap<PathBuf, String>>,
+    }
+
+    impl FakeWorkspace {
+        fn with_file(path: impl Into<PathBuf>, content: impl Into<String>) -> Self {
+            let workspace = Self::default();
+            workspace
+                .files
+                .lock()
+                .unwrap()
+                .insert(path.into(), content.into());
+            workspace
+        }
     }
 
     #[async_trait]
@@ -256,6 +356,9 @@ mod tests {
         async fn clean(&self, temp_folder: &Path) -> AppResult<()> {
             self.cleaned.lock().unwrap().push(temp_folder.to_path_buf());
             Ok(())
+        }
+        async fn read_file(&self, path: &Path) -> AppResult<Option<String>> {
+            Ok(self.files.lock().unwrap().get(path).cloned())
         }
     }
 
@@ -423,5 +526,164 @@ mod tests {
         assert!(result.is_err());
         // Only the inlet hook ran; `execute` never got a chance to call the process port.
         assert_eq!(process.calls.lock().unwrap().len(), 1);
+    }
+
+    #[derive(Default)]
+    struct FakeUnitState {
+        records: Mutex<HashMap<cubtera_domain::UnitStateKey, UnitStateRecord>>,
+    }
+
+    #[async_trait]
+    impl UnitStateRepository for FakeUnitState {
+        async fn get(
+            &self,
+            key: &cubtera_domain::UnitStateKey,
+        ) -> AppResult<Option<UnitStateRecord>> {
+            Ok(self.records.lock().unwrap().get(key).cloned())
+        }
+        async fn put(&self, record: &UnitStateRecord) -> AppResult<()> {
+            self.records
+                .lock()
+                .unwrap()
+                .insert(record.key(), record.clone());
+            Ok(())
+        }
+        async fn delete(&self, key: &cubtera_domain::UnitStateKey) -> AppResult<()> {
+            self.records.lock().unwrap().remove(key);
+            Ok(())
+        }
+        async fn list(&self, org: &str, unit: &str) -> AppResult<Vec<UnitStateRecord>> {
+            Ok(self
+                .records
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|r| r.org == org && r.unit == unit)
+                .cloned()
+                .collect())
+        }
+    }
+
+    fn unit_with_publish() -> Unit {
+        let mut manifest = Manifest::new(vec!["env".to_string()], "tf");
+        manifest.outputs = Some(cubtera_domain::OutputsSpec { publish: true });
+        Unit::new("network", "cubtera", manifest)
+            .with_temp_folder("/tmp/unit")
+            .with_dimension(cubtera_domain::DimensionRef::new("env", "prod"))
+    }
+
+    #[tokio::test]
+    async fn run_publishes_outputs_for_apply_when_manifest_requests_it() {
+        let workspace = Arc::new(FakeWorkspace::with_file(
+            "/tmp/unit/cubtera_outputs.json",
+            r#"{"vpc_id": "vpc-1"}"#,
+        ));
+        let process = Arc::new(FakeProcess {
+            exit_code: 0,
+            ..Default::default()
+        });
+        let factory = Arc::new(FakeFactory);
+        let unit_state = Arc::new(FakeUnitState::default());
+        let service = RunService::new(factory, workspace, process, copy_config())
+            .with_unit_state(unit_state.clone());
+
+        let result = service
+            .run(&unit_with_publish(), vec!["apply".to_string()], None)
+            .await
+            .unwrap();
+        assert!(result.is_success());
+
+        let records = unit_state.records.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        let record = records.values().next().unwrap();
+        assert_eq!(record.dims, vec!["env:prod".to_string()]);
+        assert_eq!(record.outputs, serde_json::json!({"vpc_id": "vpc-1"}));
+    }
+
+    #[tokio::test]
+    async fn run_does_not_publish_when_manifest_has_no_outputs_block() {
+        let workspace = Arc::new(FakeWorkspace::with_file(
+            "/tmp/unit/cubtera_outputs.json",
+            r#"{"vpc_id": "vpc-1"}"#,
+        ));
+        let process = Arc::new(FakeProcess {
+            exit_code: 0,
+            ..Default::default()
+        });
+        let factory = Arc::new(FakeFactory);
+        let unit_state = Arc::new(FakeUnitState::default());
+        let service = RunService::new(factory, workspace, process, copy_config())
+            .with_unit_state(unit_state.clone());
+
+        service
+            .run(&unit(), vec!["apply".to_string()], None)
+            .await
+            .unwrap();
+
+        assert!(unit_state.records.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_does_not_publish_for_non_apply_destroy_commands() {
+        let workspace = Arc::new(FakeWorkspace::with_file(
+            "/tmp/unit/cubtera_outputs.json",
+            r#"{"vpc_id": "vpc-1"}"#,
+        ));
+        let process = Arc::new(FakeProcess {
+            exit_code: 0,
+            ..Default::default()
+        });
+        let factory = Arc::new(FakeFactory);
+        let unit_state = Arc::new(FakeUnitState::default());
+        let service = RunService::new(factory, workspace, process, copy_config())
+            .with_unit_state(unit_state.clone());
+
+        service
+            .run(&unit_with_publish(), vec!["plan".to_string()], None)
+            .await
+            .unwrap();
+
+        assert!(unit_state.records.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_skips_publish_without_failing_when_outputs_file_is_missing() {
+        let workspace = Arc::new(FakeWorkspace::default());
+        let process = Arc::new(FakeProcess {
+            exit_code: 0,
+            ..Default::default()
+        });
+        let factory = Arc::new(FakeFactory);
+        let unit_state = Arc::new(FakeUnitState::default());
+        let service = RunService::new(factory, workspace, process, copy_config())
+            .with_unit_state(unit_state.clone());
+
+        let result = service
+            .run(&unit_with_publish(), vec!["apply".to_string()], None)
+            .await
+            .unwrap();
+
+        assert!(result.is_success());
+        assert!(unit_state.records.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_does_not_fail_when_publish_requested_but_no_store_configured() {
+        let workspace = Arc::new(FakeWorkspace::with_file(
+            "/tmp/unit/cubtera_outputs.json",
+            r#"{"vpc_id": "vpc-1"}"#,
+        ));
+        let process = Arc::new(FakeProcess {
+            exit_code: 0,
+            ..Default::default()
+        });
+        let factory = Arc::new(FakeFactory);
+        let service = RunService::new(factory, workspace, process, copy_config());
+
+        let result = service
+            .run(&unit_with_publish(), vec!["apply".to_string()], None)
+            .await
+            .unwrap();
+        assert!(result.is_success());
     }
 }

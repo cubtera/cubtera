@@ -89,6 +89,16 @@ pub struct Manifest {
     /// Arbitrary state backend config, e.g. `bucket`, `path` (per-backend
     /// meaning, rendered via handlebars in the state config template)
     pub state: Option<HashMap<String, String>>,
+    /// `[inputs.<alias>]` entries: other units' published outputs this unit
+    /// consumes, materialized as `cubtera_in_<alias>.json` (see
+    /// `crate::project_state_key` for how `dims`/`ext` are resolved when
+    /// left unset). Empty by default - most units consume nothing.
+    #[serde(default)]
+    pub inputs: HashMap<String, InputSpec>,
+    /// `[outputs]` block: whether this unit publishes its own outputs for
+    /// other units to consume. `None`/`publish = false` means it doesn't -
+    /// publishing is an explicit opt-in, never automatic.
+    pub outputs: Option<OutputsSpec>,
 }
 
 impl Default for Manifest {
@@ -104,6 +114,8 @@ impl Default for Manifest {
             spec: None,
             runner: None,
             state: None,
+            inputs: HashMap::new(),
+            outputs: None,
         }
     }
 }
@@ -170,6 +182,49 @@ impl Manifest {
             .get("state_backend")
             .map(|s| s.as_str())
     }
+
+    /// Whether this unit publishes its outputs (`[outputs] publish = true`)
+    /// for other units to consume via `[inputs.<alias>]`. Explicit opt-in -
+    /// defaults to `false`.
+    pub fn publishes_outputs(&self) -> bool {
+        self.outputs.as_ref().map(|o| o.publish).unwrap_or(false)
+    }
+}
+
+/// One `[inputs.<alias>]` entry: this unit reads `unit`'s published
+/// outputs, aliased as `<alias>` (materialized as
+/// `cubtera_in_<alias>.json`). Left unset, `dims`/`ext` are derived from
+/// this unit's own resolved dimension chain, projected onto the producer's
+/// required dimension types - see `crate::project_state_key`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InputSpec {
+    /// Producer unit name
+    pub unit: String,
+    /// Explicit producer dimensions ("type:name"), overriding automatic
+    /// projection from this unit's own resolved dimension chain
+    pub dims: Option<Vec<String>>,
+    /// Explicit producer extensions ("type:name")
+    pub ext: Option<Vec<String>>,
+    /// Missing producer state is a hard error when true. Defaults to `true`
+    /// - a silently-empty input is rarely what a unit wants.
+    pub required: Option<bool>,
+}
+
+impl InputSpec {
+    /// Whether a missing producer state should fail the run (default: yes)
+    pub fn is_required(&self) -> bool {
+        self.required.unwrap_or(true)
+    }
+}
+
+/// `[outputs]` block: whether this unit publishes its outputs for other
+/// units to consume via `[inputs.<alias>]`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct OutputsSpec {
+    /// Publish this unit's outputs after a successful apply/destroy.
+    /// Explicit opt-in - no unit publishes by default.
+    #[serde(default)]
+    pub publish: bool,
 }
 
 /// Legacy spec block: extra env vars and files to make available to the unit
@@ -373,6 +428,60 @@ AWS_SESSION_TOKEN = "AWS_SESSION_TOKEN"
             files.required.unwrap().get("~/.ssh/id_rsa"),
             Some(&"id_rsa".to_string())
         );
+    }
+
+    #[test]
+    fn test_from_toml_outputs_publish() {
+        let toml = r#"
+dimensions = ["dome"]
+type = "tf"
+
+[outputs]
+publish = true
+"#;
+        let manifest = Manifest::from_toml(toml).unwrap();
+        assert!(manifest.publishes_outputs());
+    }
+
+    #[test]
+    fn test_from_toml_outputs_absent_does_not_publish() {
+        let manifest = Manifest::new(vec!["dome".to_string()], "tf");
+        assert!(!manifest.publishes_outputs());
+    }
+
+    #[test]
+    fn test_from_toml_inputs_with_automatic_projection() {
+        let toml = r#"
+dimensions = ["dc"]
+type = "bash"
+
+[inputs.network]
+unit = "network"
+"#;
+        let manifest = Manifest::from_toml(toml).unwrap();
+        let input = manifest.inputs.get("network").unwrap();
+        assert_eq!(input.unit, "network");
+        assert!(input.dims.is_none());
+        assert!(input.is_required());
+    }
+
+    #[test]
+    fn test_from_toml_inputs_with_explicit_dims_and_optional() {
+        let toml = r#"
+dimensions = ["dc"]
+type = "bash"
+
+[inputs.prod_network]
+unit = "network"
+dims = ["dome:prod"]
+ext = ["index:0"]
+required = false
+"#;
+        let manifest = Manifest::from_toml(toml).unwrap();
+        let input = manifest.inputs.get("prod_network").unwrap();
+        assert_eq!(input.dims, Some(vec!["dome:prod".to_string()]));
+        assert_eq!(input.ext, Some(vec!["index:0".to_string()]));
+        assert!(!input.is_required());
     }
 
     #[test]

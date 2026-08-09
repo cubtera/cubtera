@@ -1,0 +1,149 @@
+//! `cubtera state get/ls/rm` against a fs-json `UnitStateRepository` seeded
+//! directly (bypassing an actual `run` + `[outputs] publish = true`, which
+//! would need real terraform/tofu credentials) - these commands are pure
+//! reads/writes against whatever a producer already published, so seeding
+//! the store directly is a faithful test of the CLI plumbing.
+
+use assert_cmd::Command;
+use cubtera_core::ports::UnitStateRepository;
+use cubtera_domain::UnitStateRecord;
+use cubtera_persistence::fs::FsUnitStateRepository;
+use std::path::{Path, PathBuf};
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap()
+}
+
+fn cli(state_path: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("cubtera").unwrap();
+    cmd.current_dir(repo_root())
+        .env("CUBTERA_UNIT_STATE_PATH", state_path)
+        .args(["-c", "example/config.toml"]);
+    cmd
+}
+
+fn fresh_state_dir() -> PathBuf {
+    tempfile::tempdir().unwrap().into_path()
+}
+
+async fn seed(state_path: &Path, unit: &str, dims: &[&str], outputs: serde_json::Value) {
+    let repo = FsUnitStateRepository::new(state_path.to_path_buf());
+    let record = UnitStateRecord {
+        org: "cubtera".to_string(),
+        unit: unit.to_string(),
+        dims: dims.iter().map(|s| s.to_string()).collect(),
+        ext: vec![],
+        outputs,
+        updated_at: 1_700_000_000,
+    };
+    repo.put(&record).await.unwrap();
+}
+
+#[test]
+fn state_get_prints_published_outputs_for_exact_key() {
+    let state_path = fresh_state_dir();
+    tokio::runtime::Runtime::new().unwrap().block_on(seed(
+        &state_path,
+        "network",
+        &["dome:prod"],
+        serde_json::json!({"vpc_id": "vpc-123"}),
+    ));
+
+    cli(&state_path)
+        .args(["state", "get", "-u", "network", "-d", "dome:prod"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("vpc-123"));
+}
+
+#[test]
+fn state_get_missing_key_exits_not_found() {
+    let state_path = fresh_state_dir();
+
+    cli(&state_path)
+        .args(["state", "get", "-u", "network", "-d", "dome:prod"])
+        .assert()
+        .code(4);
+}
+
+#[test]
+fn state_get_json_emits_full_record() {
+    let state_path = fresh_state_dir();
+    tokio::runtime::Runtime::new().unwrap().block_on(seed(
+        &state_path,
+        "network",
+        &["dome:prod"],
+        serde_json::json!({"vpc_id": "vpc-123"}),
+    ));
+
+    let output = cli(&state_path)
+        .args(["--json", "state", "get", "-u", "network", "-d", "dome:prod"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(parsed["outputs"]["vpc_id"], "vpc-123");
+    assert_eq!(parsed["dims"][0], "dome:prod");
+}
+
+#[test]
+fn state_ls_lists_every_published_dims_combination() {
+    let state_path = fresh_state_dir();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(seed(
+        &state_path,
+        "network",
+        &["dome:prod"],
+        serde_json::json!({"a": 1}),
+    ));
+    rt.block_on(seed(
+        &state_path,
+        "network",
+        &["dome:staging"],
+        serde_json::json!({"a": 2}),
+    ));
+
+    cli(&state_path)
+        .args(["state", "ls", "-u", "network"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("dome:prod"))
+        .stdout(predicates::str::contains("dome:staging"));
+}
+
+#[test]
+fn state_ls_on_unpublished_unit_says_so() {
+    let state_path = fresh_state_dir();
+
+    cli(&state_path)
+        .args(["state", "ls", "-u", "network"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "No published state found for unit 'network'",
+        ));
+}
+
+#[test]
+fn state_rm_deletes_the_record() {
+    let state_path = fresh_state_dir();
+    tokio::runtime::Runtime::new().unwrap().block_on(seed(
+        &state_path,
+        "network",
+        &["dome:prod"],
+        serde_json::json!({"vpc_id": "vpc-123"}),
+    ));
+
+    cli(&state_path)
+        .args(["state", "rm", "-u", "network", "-d", "dome:prod"])
+        .assert()
+        .success();
+
+    cli(&state_path)
+        .args(["state", "get", "-u", "network", "-d", "dome:prod"])
+        .assert()
+        .code(4);
+}

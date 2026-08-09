@@ -5,8 +5,8 @@
 use crate::dimension::{DimType, Dimension, IncludeEntry};
 use crate::manifest::Manifest;
 use crate::materialization::{MaterializationPlan, MaterializationStep};
-use serde_json::Value;
-use std::collections::HashMap;
+use serde_json::{json, Value};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// A unit of infrastructure operation
@@ -34,6 +34,17 @@ pub struct Unit {
     pub extensions: Vec<String>,
     /// Git SHA of the unit source
     pub git_sha: Option<String>,
+    /// Full ancestor chain ("type:name") across every resolved dimension -
+    /// used to project a producer's required dims onto this unit's own
+    /// chain for `[inputs.<alias>]` resolution (see
+    /// `crate::project_state_key`). Populated by `UnitService`, not by
+    /// `Unit::new` - a freshly-constructed unit has an empty chain.
+    pub dim_key_path: Vec<String>,
+    /// Resolved `[inputs.<alias>]` outputs: alias -> producer's published
+    /// output blob. A `BTreeMap` (not `HashMap`) so `materialize()`'s
+    /// generated file list has a deterministic order. Populated by
+    /// `UnitService` before materialization.
+    pub resolved_inputs: BTreeMap<String, Value>,
 }
 
 /// Reference to a dimension value
@@ -90,6 +101,8 @@ impl Unit {
             temp_folder: PathBuf::new(),
             extensions: Vec::new(),
             git_sha: None,
+            dim_key_path: Vec::new(),
+            resolved_inputs: BTreeMap::new(),
         }
     }
 
@@ -132,6 +145,20 @@ impl Unit {
     /// Set aggregated dimension includes
     pub fn with_includes(mut self, includes: Vec<IncludeEntry>) -> Self {
         self.includes = includes;
+        self
+    }
+
+    /// Set the full resolved dimension ancestor chain ("type:name"), used
+    /// for `[inputs.<alias>]` projection (see `crate::project_state_key`).
+    pub fn with_dim_key_path(mut self, dim_key_path: Vec<String>) -> Self {
+        self.dim_key_path = dim_key_path;
+        self
+    }
+
+    /// Set resolved `[inputs.<alias>]` outputs (alias -> producer's output
+    /// blob), materialized as `cubtera_in_<alias>.json` by [`Self::materialize`].
+    pub fn with_resolved_inputs(mut self, resolved_inputs: BTreeMap<String, Value>) -> Self {
+        self.resolved_inputs = resolved_inputs;
         self
     }
 
@@ -312,6 +339,30 @@ impl Unit {
                     required: false,
                 });
             }
+        }
+
+        // `resolved_inputs` is a `BTreeMap`, so this iterates (and the
+        // aggregate file below serializes) in a deterministic alias order.
+        for (alias, value) in &self.resolved_inputs {
+            plan.push(MaterializationStep::WriteFile {
+                path: self.temp_folder.join(format!("cubtera_in_{alias}.json")),
+                content: serde_json::to_string_pretty(&json!({
+                    format!("in_{alias}"): value
+                }))
+                .unwrap_or_default(),
+            });
+        }
+        if !self.resolved_inputs.is_empty() {
+            plan.push(MaterializationStep::WriteFile {
+                path: self.temp_folder.join("cubtera_inputs.json"),
+                content: serde_json::to_string_pretty(&Value::Object(
+                    self.resolved_inputs
+                        .iter()
+                        .map(|(alias, value)| (alias.clone(), value.clone()))
+                        .collect(),
+                ))
+                .unwrap_or_default(),
+            });
         }
 
         plan
@@ -692,5 +743,56 @@ mod tests {
             MaterializationStep::CopyFile { src, dst, required: false }
                 if src == Path::new("~/.aws/config") && dst == Path::new("/tmp/cubtera/network/aws_config")
         )));
+    }
+
+    #[test]
+    fn materialize_skips_input_files_when_no_resolved_inputs() {
+        let plan = base_unit().materialize(Path::new("/modules"), None);
+        assert!(!plan.steps.iter().any(|s| matches!(
+            s,
+            MaterializationStep::WriteFile { path, .. }
+                if path == Path::new("/tmp/cubtera/network/cubtera_inputs.json")
+        )));
+    }
+
+    #[test]
+    fn materialize_writes_per_alias_and_aggregate_input_files() {
+        let mut resolved_inputs = BTreeMap::new();
+        resolved_inputs.insert("network".to_string(), json!({"vpc_id": "vpc-123"}));
+        resolved_inputs.insert("certs".to_string(), json!({"cert_arn": "arn:aws:acm:..."}));
+        let unit = base_unit().with_resolved_inputs(resolved_inputs);
+
+        let plan = unit.materialize(Path::new("/modules"), None);
+
+        let network_content = plan
+            .steps
+            .iter()
+            .find_map(|s| match s {
+                MaterializationStep::WriteFile { path, content }
+                    if path == Path::new("/tmp/cubtera/network/cubtera_in_network.json") =>
+                {
+                    Some(content)
+                }
+                _ => None,
+            })
+            .expect("cubtera_in_network.json step");
+        let parsed: Value = serde_json::from_str(network_content).unwrap();
+        assert_eq!(parsed["in_network"]["vpc_id"], "vpc-123");
+
+        let aggregate_content = plan
+            .steps
+            .iter()
+            .find_map(|s| match s {
+                MaterializationStep::WriteFile { path, content }
+                    if path == Path::new("/tmp/cubtera/network/cubtera_inputs.json") =>
+                {
+                    Some(content)
+                }
+                _ => None,
+            })
+            .expect("cubtera_inputs.json step");
+        let parsed: Value = serde_json::from_str(aggregate_content).unwrap();
+        assert_eq!(parsed["network"]["vpc_id"], "vpc-123");
+        assert_eq!(parsed["certs"]["cert_arn"], "arn:aws:acm:...");
     }
 }

@@ -48,11 +48,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hierarchy = Repositories::hierarchy(&config);
 
     let dimensions = Arc::new(DimensionService::new(repos.inventory, hierarchy));
-    let units = Arc::new(UnitService::new(repos.units, dimensions.clone()));
+    let unit_state = repos.unit_state.clone();
+    let units = Arc::new(
+        UnitService::new(repos.units, dimensions.clone()).with_unit_state(repos.unit_state),
+    );
 
     tracing::info!("Starting Cubtera MCP server");
 
-    let service = CubteraMcp::new(dimensions, units, repos.deployment_log)
+    let service = CubteraMcp::new(dimensions, units, repos.deployment_log, unit_state)
         .serve(stdio())
         .await
         .inspect_err(|e| {

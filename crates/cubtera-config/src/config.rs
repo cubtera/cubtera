@@ -133,6 +133,9 @@ struct PartialConfig {
     /// unset.
     #[serde(alias = "deployment_log_path")]
     deployment_log_path: Option<PathBuf>,
+    /// FS-json unit state root, used when `unit_state` (Mongo) is unset.
+    #[serde(alias = "unit_state_path")]
+    unit_state_path: Option<PathBuf>,
     #[serde(alias = "dim_relations")]
     dim_relations: Option<Vec<String>>,
     orgs: Option<Vec<String>>,
@@ -150,6 +153,8 @@ struct PartialConfig {
     state: HashMap<String, StateBackendConfig>,
     #[serde(alias = "deployment_log")]
     deployment_log: Option<DeploymentLogConfig>,
+    #[serde(alias = "unit_state")]
+    unit_state: Option<UnitStateConfig>,
     #[serde(alias = "api_key")]
     api_key: Option<String>,
 }
@@ -181,6 +186,10 @@ impl PartialConfig {
                 .deployment_log_path
                 .clone()
                 .or_else(|| base.deployment_log_path.clone()),
+            unit_state_path: over
+                .unit_state_path
+                .clone()
+                .or_else(|| base.unit_state_path.clone()),
             dim_relations: over
                 .dim_relations
                 .clone()
@@ -199,6 +208,7 @@ impl PartialConfig {
                 .deployment_log
                 .clone()
                 .or_else(|| base.deployment_log.clone()),
+            unit_state: over.unit_state.clone().or_else(|| base.unit_state.clone()),
             api_key: over.api_key.clone().or_else(|| base.api_key.clone()),
         }
     }
@@ -217,6 +227,7 @@ impl PartialConfig {
             deployment_log_path: self
                 .deployment_log_path
                 .unwrap_or_else(default_deployment_log_path),
+            unit_state_path: self.unit_state_path.unwrap_or_else(default_unit_state_path),
             dim_relations: self.dim_relations.unwrap_or_else(default_dim_relations),
             file_name_separator: self
                 .file_name_separator
@@ -227,6 +238,7 @@ impl PartialConfig {
             runner: self.runner,
             state: self.state,
             deployment_log: self.deployment_log,
+            unit_state: self.unit_state,
             mongodb_connection_string: None,
             api_key: self.api_key,
         }
@@ -269,6 +281,10 @@ pub struct Config {
     /// `{org}.jsonl` file per org), used unless `deployment_log` (Mongo) is
     /// set
     pub deployment_log_path: PathBuf,
+    /// Root directory for the FS-json unit state backend (one
+    /// `outputs.json` file per published key), used unless `unit_state`
+    /// (Mongo) is set
+    pub unit_state_path: PathBuf,
 
     /// Dimension relations (hierarchy)
     pub dim_relations: Vec<String>,
@@ -291,6 +307,8 @@ pub struct Config {
 
     /// Deployment log configuration
     pub deployment_log: Option<DeploymentLogConfig>,
+    /// Unit state (cross-unit outputs) configuration
+    pub unit_state: Option<UnitStateConfig>,
 
     /// Log level
     pub log_level: String,
@@ -333,6 +351,12 @@ fn default_deployment_log_path() -> PathBuf {
     home_dir()
         .map(|h| h.join(".cubtera").join("dlog"))
         .unwrap_or_else(|| PathBuf::from("/tmp/cubtera-dlog"))
+}
+
+fn default_unit_state_path() -> PathBuf {
+    home_dir()
+        .map(|h| h.join(".cubtera").join("state"))
+        .unwrap_or_else(|| PathBuf::from("/tmp/cubtera-state"))
 }
 
 fn default_dim_relations() -> Vec<String> {
@@ -420,6 +444,10 @@ impl Config {
             self.deployment_log_path = PathBuf::from(dlog_path);
         }
 
+        if let Some(unit_state_path) = source.env("CUBTERA_UNIT_STATE_PATH") {
+            self.unit_state_path = PathBuf::from(unit_state_path);
+        }
+
         if source.env("CUBTERA_ALWAYS_COPY_FILES").is_some() {
             self.always_copy_files = true;
         }
@@ -462,6 +490,32 @@ fn default_dlog_database() -> String {
 
 fn default_dlog_collection() -> String {
     "deployments".to_string()
+}
+
+/// Unit state (cross-unit outputs) configuration - selects
+/// `MongoUnitStateRepository` for the unit state port; unset means
+/// FS-json (`Config::unit_state_path`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitStateConfig {
+    /// MongoDB connection string for unit state
+    #[serde(alias = "connection_string")]
+    pub connection_string: String,
+    /// Database name - shared by every org, which is distinguished by each
+    /// document's own `org` field
+    #[serde(default = "default_unit_state_database")]
+    pub database: String,
+    /// Collection name
+    #[serde(default = "default_unit_state_collection")]
+    pub collection: String,
+}
+
+fn default_unit_state_database() -> String {
+    "cubtera".to_string()
+}
+
+fn default_unit_state_collection() -> String {
+    "unit_state".to_string()
 }
 
 #[cfg(test)]

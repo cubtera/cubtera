@@ -10,6 +10,7 @@ modulesPath = "example/modules" # default => "modules"
 pluginsPath = "example/plugins" # default => "plugins"
 tempFolderPath = "example/.cubtera/tmp" # default => "~/.cubtera/temp"
 deploymentLogPath = "example/.cubtera/dlog" # default => "~/.cubtera/dlog" | fs-jsonl DeploymentLogRepository root, used unless [deploymentLog] below is set
+unitStatePath = "example/.cubtera/state" # default => "~/.cubtera/state" | fs-json UnitStateRepository root ({org}/{unit}/{dims}/{ext}/outputs.json), used unless [unitState] below is set
 
 dimRelations = ["dome", "env", "dc"] # default => ["dome", "env", "dc"]
 orgs = ["cubtera", "teracub"] # known orgs; first one is used when CUBTERA_ORG isn't set
@@ -56,3 +57,12 @@ outlet_command = "echo Outlet command" # runs after the runner finishes successf
 # connectionString = "mongodb://localhost:27017" # required
 # database = "cubtera" # default => "cubtera"
 # collection = "deployments" # default => "deployments"
+
+# Uncomment to switch UnitStateRepository (cross-unit [outputs]/[inputs]
+# state exchange) from fs-json (unitStatePath above) to MongoDB - all orgs
+# share this database/collection, distinguished by each entry's own "org"
+# field.
+# [cubtera.unitState]
+# connectionString = "mongodb://localhost:27017" # required
+# database = "cubtera" # default => "cubtera"
+# collection = "unit_state" # default => "unit_state"

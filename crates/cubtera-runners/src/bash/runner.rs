@@ -81,11 +81,21 @@ impl RunnerStrategy for BashRunner {
     }
 
     fn env_vars(&self, unit: &Unit, _params: &RunParams) -> Vec<(String, String)> {
-        vec![
+        let mut env = vec![
             ("CUBTERA_ORG".to_string(), unit.org.clone()),
             ("CUBTERA_UNIT".to_string(), unit.name.clone()),
             ("CUBTERA_DIM_TREE".to_string(), unit.dim_tree()),
-        ]
+        ];
+        // Same data as `cubtera_in_<alias>.json`, exposed as an env var too
+        // (JSON-encoded) so a bash script can read it without a JSON parser
+        // for simple cases (e.g. `jq <<< "$CUBTERA_IN_NETWORK"`).
+        for (alias, value) in &unit.resolved_inputs {
+            env.push((
+                format!("CUBTERA_IN_{}", alias.to_uppercase()),
+                serde_json::to_string(value).unwrap_or_default(),
+            ));
+        }
+        env
     }
 }
 
@@ -121,5 +131,26 @@ mod tests {
         let params = RunParams::new(tmp.path());
 
         assert!(strategy.build_args(&unit, &ctx, &params).await.is_err());
+    }
+
+    #[test]
+    fn env_vars_exposes_resolved_inputs_as_cubtera_in_vars() {
+        let mut resolved_inputs = std::collections::BTreeMap::new();
+        resolved_inputs.insert(
+            "network".to_string(),
+            serde_json::json!({"vpc_id": "vpc-1"}),
+        );
+        let unit = Unit::new("script", "cubtera", Manifest::new(vec![], "bash"))
+            .with_resolved_inputs(resolved_inputs);
+
+        let strategy = BashRunner::new();
+        let params = RunParams::new("/tmp");
+        let env = strategy.env_vars(&unit, &params);
+
+        let (_, value) = env
+            .iter()
+            .find(|(k, _)| k == "CUBTERA_IN_NETWORK")
+            .expect("CUBTERA_IN_NETWORK env var");
+        assert_eq!(value, r#"{"vpc_id":"vpc-1"}"#);
     }
 }

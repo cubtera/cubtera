@@ -11,6 +11,7 @@ mod materialization;
 mod runner;
 mod schema;
 mod unit;
+mod unit_state;
 
 pub use access::*;
 pub use dimension::*;
@@ -20,6 +21,7 @@ pub use materialization::*;
 pub use runner::*;
 pub use schema::*;
 pub use unit::*;
+pub use unit_state::*;
 
 /// Re-exported so downstream crates use a single `Value` type across all layers.
 /// The domain has no I/O dependency of its own; `serde_json` is treated as a data

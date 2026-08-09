@@ -3,7 +3,7 @@
 use crate::routes;
 use axum::Router;
 use cubtera_config::Config;
-use cubtera_core::ports::{CopyConfig, DeploymentLogRepository};
+use cubtera_core::ports::{CopyConfig, DeploymentLogRepository, UnitStateRepository};
 use cubtera_core::App;
 use cubtera_persistence::fs::FsWorkspace;
 use cubtera_persistence::Repositories;
@@ -23,6 +23,10 @@ pub struct AppState {
     /// only writes to it after a run) so `/v1/{org}/dlog` can read it
     /// directly.
     pub deployment_log: Arc<dyn DeploymentLogRepository>,
+    /// Kept alongside `app` for the same reason as `deployment_log` - `GET
+    /// /v1/{org}/units/{name}/state` is a direct, read-only lookup, not a
+    /// consumer's `[inputs]` resolution (which only happens inside a run).
+    pub unit_state: Arc<dyn UnitStateRepository>,
     /// `None` disables auth (local dev default) - see `crate::auth`.
     pub api_key: Option<String>,
 }
@@ -31,6 +35,7 @@ pub async fn run(addr: &str, config: Config) -> Result<(), Box<dyn std::error::E
     let repos = Repositories::from_config(&config).await?;
     let hierarchy = Repositories::hierarchy(&config);
     let deployment_log = repos.deployment_log.clone();
+    let unit_state = repos.unit_state.clone();
 
     let copy_config = CopyConfig {
         modules_path: config.modules_path.clone(),
@@ -48,6 +53,7 @@ pub async fn run(addr: &str, config: Config) -> Result<(), Box<dyn std::error::E
         Arc::new(TokioProcessRunner::new()),
         copy_config,
         Some(repos.deployment_log),
+        Some(repos.unit_state),
     );
 
     if config.api_key.is_none() {
@@ -59,6 +65,7 @@ pub async fn run(addr: &str, config: Config) -> Result<(), Box<dyn std::error::E
     let state = Arc::new(AppState {
         app,
         deployment_log,
+        unit_state,
         api_key: config.api_key.clone(),
     });
 

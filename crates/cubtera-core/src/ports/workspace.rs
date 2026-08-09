@@ -21,4 +21,10 @@ pub trait Workspace: Send + Sync {
 
     /// Remove a unit's temp working directory, if it exists.
     async fn clean(&self, temp_folder: &std::path::Path) -> AppResult<()>;
+
+    /// Read a file's contents from a unit's (already materialized) working
+    /// directory, `None` if it doesn't exist. Used by `RunService` to pick
+    /// up a runner's `cubtera_outputs.json` after `execute` without
+    /// hardcoding a filesystem read outside this port.
+    async fn read_file(&self, path: &std::path::Path) -> AppResult<Option<String>>;
 }

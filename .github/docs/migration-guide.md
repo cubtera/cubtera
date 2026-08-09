@@ -32,6 +32,7 @@ shape but the field set changed:
 | `dim_relations` (colon-separated string) | `dimRelations` (TOML array) | same array-instead-of-colon-string change. |
 | `db` (MongoDB URL) | *(still env-var only)* `CUBTERA_DB` | Selects the `InventoryRepository` backend (Mongo vs FS); requires a build with `cubtera-persistence`'s `mongodb` feature (the default for the `cubtera`/`cubtera-api` binaries). |
 | `dlog_db` | `[deploymentLog]` (`connectionString`/`database`/`collection`) | Selects `MongoDeploymentLogRepository`; unset means the fs-jsonl backend (`deploymentLogPath`, default `~/.cubtera/dlog`). |
+| *(new)* | `unitStatePath` / `[unitState]` (`connectionString`/`database`/`collection`) | Cross-unit `[outputs]`/`[inputs]` state exchange (see "Unit manifests" below) has no v1 equivalent. `[unitState]` selects `MongoUnitStateRepository`; unset means the fs-json backend (`unitStatePath`, default `~/.cubtera/state`). |
 | `dlog_job_*_env` | *(not ported)* | v1's per-CI-provider job-env autodetection for dlog metadata isn't carried over; deployment log entries record `command`/`exit_code`/`duration_ms`/`dimensions` but not CI job context. |
 | `clean_cache`, `always_copy_files` | `cleanCache`, `alwaysCopyFiles` | unchanged semantics. |
 | `file_name_separator` | `fileNameSeparator` | unchanged semantics, default `:`. |
@@ -69,6 +70,7 @@ Binary name is unchanged (`cubtera`), but subcommand/flag names changed:
 | `cubtera im deleteContext <context>` | *(removed)* | deliberately not ported - see "What's gone for good". |
 | `cubtera config` | `cubtera config [--json]` | `--json` prints the raw `Config` struct; without it, output is a human-readable summary. |
 | `cubtera log get -q <k:v> [--limit N]` | unchanged shape | now backed by a real `DeploymentLogRepository` (fs-jsonl by default, Mongo if `[deploymentLog]` is set) instead of being a stub. |
+| *(new)* | `cubtera state get/ls/rm -u <unit> [-d <type:name>...] [-e <type:name>...]` | no v1 equivalent - reads/deletes a producer's published `[outputs]` for an exact `dims`/`ext` key (see "Unit manifests" below). |
 
 Global flags: `--config <path>` (was env-var-only in v1's typical flow, now
 also a proper `-c/--config` CLI flag), `--log-level`, and the new `--json`
@@ -113,6 +115,14 @@ indistinguishable from success to any caller).
   rendered with handlebars against the merged `cubtera_*.json` dimension
   data and written to `values.yaml` before `helm <command...>` runs. Not a
   v1/`main` feature - new in v2 wave 2.
+- `[outputs] publish = true` and `[inputs.<alias>]` are new in v2, with no
+  v1 equivalent: a unit can publish its `apply`/`destroy` outputs
+  (`terraform`/`tofu output -json`, flattened) for another unit to consume
+  as `cubtera_in_<alias>.json`/`CUBTERA_IN_<ALIAS>`, keyed by projecting the
+  consumer's own resolved dimensions onto the producer's required ones - no
+  DAG, no auto-run of the producer, no cross-dimension guessing. See
+  [`AGENTS.md`](../../AGENTS.md#cross-unit-state-inputsoutputs) and
+  `example/units/tf_unit02`/`bash_unit01` for a worked example.
 
 ## REST API
 
@@ -136,6 +146,8 @@ indistinguishable from success to any caller).
   [`api.md`](api.md#deployment-log). Filters are `q=key:value,...` instead
   of repeated query params, since axum's query deserializer can't collect
   repeated keys into a list.
+- `GET /v1/{org}/units/{name}/state` is entirely new (no v1 equivalent) -
+  see [`api.md`](api.md#units).
 
 See [`.github/docs/api.md`](api.md) for the full v2 endpoint reference.
 
@@ -164,3 +176,10 @@ runner, and `cubtera-mcp` - a real MCP server (via the `rmcp` SDK, stdio
 transport), not the REST-prototype approach explored on `test1`. It exposes
 read-only inventory/unit/deployment-log queries as MCP tools; it does not
 expose a `run` tool, so it cannot apply infrastructure changes on its own.
+
+On top of that, wave 2 also added a cross-unit state mesh with no v1
+equivalent: `UnitStateRepository` (fs-json default, `MongoUnitStateRepository`
+opt-in), `[outputs] publish = true` / `[inputs.<alias>]` in `manifest.toml`,
+`cubtera state get/ls/rm`, `GET /v1/{org}/units/{name}/state`, and the MCP
+`get_unit_state` tool - see [`AGENTS.md`](../../AGENTS.md#cross-unit-state-inputsoutputs)
+for how the producer/consumer key projection works.

@@ -1,19 +1,24 @@
 //! Unit service
 
 use crate::error::{AppError, AppResult};
-use crate::ports::UnitRepository;
+use crate::ports::{UnitRepository, UnitStateRepository};
 use crate::services::DimensionService;
 use cubtera_domain::{
-    AccessPolicy, DimensionAccessContext, DimensionRef, IncludeEntry, Manifest, Unit,
+    project_state_key, AccessPolicy, DimensionAccessContext, DimensionRef, IncludeEntry, Manifest,
+    Unit, UnitStateKey,
 };
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 /// Service for unit operations
 pub struct UnitService {
     unit_repository: Arc<dyn UnitRepository>,
     dimensions: Arc<DimensionService>,
+    /// `None` means `[inputs.<alias>]` resolution is unavailable - a
+    /// manifest that declares inputs anyway is a hard configuration error,
+    /// never a silent skip (see `Self::resolve_inputs`).
+    unit_state: Option<Arc<dyn UnitStateRepository>>,
 }
 
 impl UnitService {
@@ -25,7 +30,14 @@ impl UnitService {
         Self {
             unit_repository,
             dimensions,
+            unit_state: None,
         }
+    }
+
+    /// Enable `[inputs.<alias>]` resolution against a unit state store.
+    pub fn with_unit_state(mut self, unit_state: Arc<dyn UnitStateRepository>) -> Self {
+        self.unit_state = Some(unit_state);
+        self
     }
 
     /// Build a unit with resolved dimensions
@@ -108,6 +120,12 @@ impl UnitService {
         // Add dimension data
         unit = unit.with_all_dimension_data(dim_data);
         unit = unit.with_includes(includes);
+        // Sorted for deterministic `--dry-run` output and error messages;
+        // `project_state_key` only filters by prefix, so order doesn't
+        // affect correctness.
+        let mut dim_key_path: Vec<String> = dims_tree.iter().cloned().collect();
+        dim_key_path.sort();
+        unit = unit.with_dim_key_path(dim_key_path);
         if !extensions.is_empty() {
             unit = unit.with_extensions(extensions.to_vec());
         }
@@ -138,7 +156,62 @@ impl UnitService {
             }
         }
 
+        unit = self.resolve_inputs(org, unit_name, unit).await?;
+
         Ok(unit)
+    }
+
+    /// Resolve every `[inputs.<alias>]` entry in `unit`'s manifest into a
+    /// producer's published outputs, projecting the producer's required
+    /// dimensions onto `unit.dim_key_path` when the manifest doesn't name
+    /// them explicitly (see `cubtera_domain::project_state_key`).
+    ///
+    /// A manifest with `[inputs.*]` but no unit state store configured is a
+    /// hard error - never a silent "no inputs resolved". Same for a missing
+    /// required input.
+    async fn resolve_inputs(&self, org: &str, unit_name: &str, unit: Unit) -> AppResult<Unit> {
+        if unit.manifest.inputs.is_empty() {
+            return Ok(unit);
+        }
+
+        let store = self.unit_state.as_ref().ok_or_else(|| {
+            AppError::config(format!(
+                "unit '{unit_name}' declares [inputs] but no unit state store is configured \
+                 (set unitStatePath or [unitState] in config.toml)"
+            ))
+        })?;
+
+        let mut resolved_inputs: BTreeMap<String, Value> = BTreeMap::new();
+        for (alias, spec) in &unit.manifest.inputs {
+            let dims = match &spec.dims {
+                Some(explicit) => explicit.clone(),
+                None => {
+                    let producer_manifest = self
+                        .unit_repository
+                        .find_manifest(org, &spec.unit)
+                        .await?
+                        .ok_or_else(|| AppError::not_found("unit", spec.unit.clone()))?;
+                    project_state_key(&unit.dim_key_path, &producer_manifest.dimensions)?
+                }
+            };
+            let ext = spec.ext.clone().unwrap_or_default();
+            let key = UnitStateKey::new(org, spec.unit.clone(), dims, ext);
+
+            match store.get(&key).await? {
+                Some(record) => {
+                    resolved_inputs.insert(alias.clone(), record.outputs);
+                }
+                None if spec.is_required() => {
+                    return Err(AppError::not_found(
+                        "unit state",
+                        format!("{} (projected key: {})", spec.unit, key.canonical()),
+                    ));
+                }
+                None => {}
+            }
+        }
+
+        Ok(unit.with_resolved_inputs(resolved_inputs))
     }
 
     /// List all available units
@@ -219,19 +292,69 @@ mod tests {
     }
 
     struct FakeUnits {
-        manifest: Manifest,
+        manifests: HashMap<String, Manifest>,
     }
 
     #[async_trait]
     impl UnitRepository for FakeUnits {
-        async fn find_manifest(&self, _org: &str, _unit_name: &str) -> AppResult<Option<Manifest>> {
-            Ok(Some(self.manifest.clone()))
+        async fn find_manifest(&self, _org: &str, unit_name: &str) -> AppResult<Option<Manifest>> {
+            Ok(self.manifests.get(unit_name).cloned())
         }
         async fn get_unit_path(&self, _org: &str, _unit_name: &str) -> AppResult<Option<String>> {
             Ok(Some("/units/network".to_string()))
         }
         async fn list_units(&self, _org: &str) -> AppResult<Vec<String>> {
-            Ok(vec!["network".to_string()])
+            Ok(self.manifests.keys().cloned().collect())
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeUnitState {
+        records: std::sync::Mutex<
+            HashMap<cubtera_domain::UnitStateKey, cubtera_domain::UnitStateRecord>,
+        >,
+    }
+
+    impl FakeUnitState {
+        fn with_record(record: cubtera_domain::UnitStateRecord) -> Self {
+            let state = Self::default();
+            state.records.lock().unwrap().insert(record.key(), record);
+            state
+        }
+    }
+
+    #[async_trait]
+    impl crate::ports::UnitStateRepository for FakeUnitState {
+        async fn get(
+            &self,
+            key: &cubtera_domain::UnitStateKey,
+        ) -> AppResult<Option<cubtera_domain::UnitStateRecord>> {
+            Ok(self.records.lock().unwrap().get(key).cloned())
+        }
+        async fn put(&self, record: &cubtera_domain::UnitStateRecord) -> AppResult<()> {
+            self.records
+                .lock()
+                .unwrap()
+                .insert(record.key(), record.clone());
+            Ok(())
+        }
+        async fn delete(&self, key: &cubtera_domain::UnitStateKey) -> AppResult<()> {
+            self.records.lock().unwrap().remove(key);
+            Ok(())
+        }
+        async fn list(
+            &self,
+            org: &str,
+            unit: &str,
+        ) -> AppResult<Vec<cubtera_domain::UnitStateRecord>> {
+            Ok(self
+                .records
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|r| r.org == org && r.unit == unit)
+                .cloned()
+                .collect())
         }
     }
 
@@ -251,8 +374,10 @@ mod tests {
     }
 
     fn unit_service(manifest: Manifest, env_meta: serde_json::Value) -> UnitService {
+        let mut manifests = HashMap::new();
+        manifests.insert("network".to_string(), manifest);
         UnitService::new(
-            Arc::new(FakeUnits { manifest }),
+            Arc::new(FakeUnits { manifests }),
             dimension_service(env_meta),
         )
     }
@@ -315,5 +440,138 @@ mod tests {
             .build_unit("cubtera", "network", &["env:prod".to_string()])
             .await;
         assert!(matches!(result, Err(AppError::Validation(_))));
+    }
+
+    fn consumer_manifest_with_input(required: Option<bool>) -> Manifest {
+        let mut manifest = Manifest::new(vec!["env".to_string()], "bash");
+        manifest.inputs.insert(
+            "net".to_string(),
+            cubtera_domain::InputSpec {
+                unit: "network_producer".to_string(),
+                dims: None,
+                ext: None,
+                required,
+            },
+        );
+        manifest
+    }
+
+    fn unit_service_with_producer(
+        consumer: Manifest,
+        producer: Manifest,
+        env_meta: serde_json::Value,
+        unit_state: Option<Arc<dyn crate::ports::UnitStateRepository>>,
+    ) -> UnitService {
+        let mut manifests = HashMap::new();
+        manifests.insert("network".to_string(), consumer);
+        manifests.insert("network_producer".to_string(), producer);
+        let service = UnitService::new(
+            Arc::new(FakeUnits { manifests }),
+            dimension_service(env_meta),
+        );
+        match unit_state {
+            Some(store) => service.with_unit_state(store),
+            None => service,
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_inputs_projects_producer_dims_from_consumer_chain() {
+        let producer_manifest = Manifest::new(vec!["env".to_string()], "tf");
+        let record = cubtera_domain::UnitStateRecord {
+            org: "cubtera".to_string(),
+            unit: "network_producer".to_string(),
+            dims: vec!["env:prod".to_string()],
+            ext: vec![],
+            outputs: json!({"vpc_id": "vpc-1"}),
+            updated_at: 0,
+        };
+        let store: Arc<dyn crate::ports::UnitStateRepository> =
+            Arc::new(FakeUnitState::with_record(record));
+        let service = unit_service_with_producer(
+            consumer_manifest_with_input(None),
+            producer_manifest,
+            json!({}),
+            Some(store),
+        );
+
+        let unit = service
+            .build_unit("cubtera", "network", &["env:prod".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            unit.resolved_inputs.get("net"),
+            Some(&json!({"vpc_id": "vpc-1"}))
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_inputs_fails_when_required_input_missing() {
+        let producer_manifest = Manifest::new(vec!["env".to_string()], "tf");
+        let store: Arc<dyn crate::ports::UnitStateRepository> = Arc::new(FakeUnitState::default());
+        let service = unit_service_with_producer(
+            consumer_manifest_with_input(None),
+            producer_manifest,
+            json!({}),
+            Some(store),
+        );
+
+        let result = service
+            .build_unit("cubtera", "network", &["env:prod".to_string()])
+            .await;
+        assert!(matches!(result, Err(AppError::NotFound { .. })));
+    }
+
+    #[tokio::test]
+    async fn resolve_inputs_skips_when_optional_input_missing() {
+        let producer_manifest = Manifest::new(vec!["env".to_string()], "tf");
+        let store: Arc<dyn crate::ports::UnitStateRepository> = Arc::new(FakeUnitState::default());
+        let service = unit_service_with_producer(
+            consumer_manifest_with_input(Some(false)),
+            producer_manifest,
+            json!({}),
+            Some(store),
+        );
+
+        let unit = service
+            .build_unit("cubtera", "network", &["env:prod".to_string()])
+            .await
+            .unwrap();
+        assert!(!unit.resolved_inputs.contains_key("net"));
+    }
+
+    #[tokio::test]
+    async fn resolve_inputs_fails_when_no_store_configured() {
+        let producer_manifest = Manifest::new(vec!["env".to_string()], "tf");
+        let service = unit_service_with_producer(
+            consumer_manifest_with_input(None),
+            producer_manifest,
+            json!({}),
+            None,
+        );
+
+        let result = service
+            .build_unit("cubtera", "network", &["env:prod".to_string()])
+            .await;
+        assert!(matches!(result, Err(AppError::Config(_))));
+    }
+
+    #[tokio::test]
+    async fn resolve_inputs_fails_when_producer_requires_unresolvable_dimension() {
+        // Producer requires "dc", which the consumer never resolved (only "env").
+        let producer_manifest = Manifest::new(vec!["dc".to_string()], "tf");
+        let store: Arc<dyn crate::ports::UnitStateRepository> = Arc::new(FakeUnitState::default());
+        let service = unit_service_with_producer(
+            consumer_manifest_with_input(None),
+            producer_manifest,
+            json!({}),
+            Some(store),
+        );
+
+        let result = service
+            .build_unit("cubtera", "network", &["env:prod".to_string()])
+            .await;
+        assert!(matches!(result, Err(AppError::Domain(_))));
     }
 }

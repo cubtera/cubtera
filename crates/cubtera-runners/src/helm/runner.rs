@@ -173,6 +173,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn merged_dimension_data_picks_up_resolved_input_files() {
+        // `cubtera_in_<alias>.json`/`cubtera_inputs.json` (written by
+        // `Unit::materialize` for resolved `[inputs.<alias>]`) match the
+        // same `cubtera_*.json` glob as dimension/extension files, so a
+        // helm chart's `values.yaml.tpl` can reference `in_<alias>` without
+        // any helm-specific wiring.
+        let tmp = tempfile::TempDir::new().unwrap();
+        tokio::fs::write(
+            tmp.path().join("cubtera_in_network.json"),
+            json!({"in_network": {"vpc_id": "vpc-1"}}).to_string(),
+        )
+        .await
+        .unwrap();
+
+        let merged = HelmRunner::merged_dimension_data(tmp.path()).await.unwrap();
+        assert_eq!(merged["in_network"]["vpc_id"], "vpc-1");
+    }
+
+    #[tokio::test]
     async fn transform_files_skips_rendering_without_template() {
         let tmp = tempfile::TempDir::new().unwrap();
         let strategy = HelmRunner::new();

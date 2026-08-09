@@ -132,6 +132,33 @@ pub trait RunnerStrategy: Send + Sync {
         Vec::new()
     }
 
+    /// Collect this run's outputs into `cubtera_outputs.json` in the unit's
+    /// temp folder, for `RunService` to publish via `UnitStateRepository`
+    /// when `manifest.outputs.publish` is set. Only called after a
+    /// successful apply/destroy. Default: a no-op - bash/helm units are
+    /// expected to write `cubtera_outputs.json` themselves (e.g. from an
+    /// outlet command); terraform/opentofu override this to run `<binary>
+    /// output -json` themselves, since the unit's own code never has to
+    /// know publishing is configured.
+    async fn collect_outputs(
+        &self,
+        _unit: &Unit,
+        _ctx: &RunContext,
+        _process: &dyn ProcessRunner,
+    ) -> AppResult<()> {
+        Ok(())
+    }
+
+    /// Normalize raw `cubtera_outputs.json` content into the flat
+    /// `{name: value}` shape every consumer's `cubtera_in_<alias>.json`
+    /// expects. Default: pass through unchanged (already-flat JSON, as
+    /// written by a bash/helm unit's own outlet script); terraform/opentofu
+    /// override this to flatten `output -json`'s `{name: {value, ...}}`
+    /// shape (see `cubtera_domain::flatten_tf_outputs`).
+    fn normalize_outputs(&self, raw: &Value) -> Value {
+        raw.clone()
+    }
+
     /// Resolve and run the command through `process`. The default composes
     /// `binary`/`build_args`/`env_vars` into one [`ProcessSpec`]; override
     /// when the call itself needs extra control (terraform wraps this in an

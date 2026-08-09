@@ -12,7 +12,9 @@ use cubtera_core::error::{AppError, AppResult};
 use cubtera_core::ports::{
     merged_env, CopyConfig, PrepareMode, ProcessRunner, ProcessSpec, RunContext, RunnerStrategy,
 };
-use cubtera_domain::{MaterializationPlan, MaterializationStep, RunParams, Unit};
+use cubtera_domain::{
+    flatten_tf_outputs, MaterializationPlan, MaterializationStep, RunParams, Unit,
+};
 use serde_json::{json, Value};
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -127,12 +129,19 @@ impl RunnerStrategy for TerraformRunner {
             .map_err(|e| AppError::runner(format!("Failed to read temp folder entry: {}", e)))?
         {
             let path = entry.path();
+            // `cubtera_outputs.json` is a producer's *own* captured
+            // `terraform output -json` (written by `collect_outputs`
+            // *after* `execute`, once the run's already applied) - it must
+            // never be fed back in as a declared variable/tfvars file on a
+            // later command against the same temp folder (e.g. `destroy`),
+            // or its keys collide with the dimension/extension variables
+            // already declared from that same apply's `cubtera_dim_*.json`.
             let is_cubtera_json = path.is_file()
                 && path.extension().map(|e| e == "json").unwrap_or(false)
                 && path
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .map(|s| s.starts_with("cubtera_"))
+                    .map(|s| s.starts_with("cubtera_") && s != "cubtera_outputs")
                     .unwrap_or(false)
                 && !path.to_string_lossy().contains(".auto.tfvars");
             if is_cubtera_json {
@@ -294,6 +303,38 @@ impl RunnerStrategy for TerraformRunner {
         // Lock is released here when `_lock` goes out of scope
         Ok(())
     }
+
+    async fn collect_outputs(
+        &self,
+        _unit: &Unit,
+        ctx: &RunContext,
+        process: &dyn ProcessRunner,
+    ) -> AppResult<()> {
+        // Reuse the exact binary `execute` just resolved (pinned version,
+        // custom path, ...) instead of re-running version resolution.
+        let binary = ctx
+            .get_metadata("runner")
+            .and_then(|v| v.get("binary"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("terraform");
+
+        let spec = ProcessSpec::shell(
+            &format!("{binary} output -json > cubtera_outputs.json"),
+            ctx.working_dir.clone(),
+        );
+        let output = process.exec(&spec).await?;
+        if !output.success() {
+            return Err(AppError::runner(format!(
+                "'{binary} output -json' failed with exit code {}",
+                output.exit_code
+            )));
+        }
+        Ok(())
+    }
+
+    fn normalize_outputs(&self, raw: &Value) -> Value {
+        flatten_tf_outputs(raw)
+    }
 }
 
 /// Convert JSON to HCL format (for terraform backend config)
@@ -432,6 +473,44 @@ mod tests {
         let mut plan = MaterializationPlan::new("/tmp/unit");
         strategy.extend_plan(&unit, &params, &mut plan);
         assert!(plan.steps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn transform_files_ignores_cubtera_outputs_json() {
+        // `cubtera_outputs.json` is written by `collect_outputs` *after* a
+        // successful apply, for publishing - it must not be picked up as
+        // more dimension data on a later command against the same temp
+        // folder (e.g. `destroy`), or its keys collide with variables
+        // already declared from that same apply's `cubtera_dim_*.json`
+        // (see the regression this guards: "Duplicate variable declaration"
+        // for `dim_dc_name`/`dim_dc_meta`).
+        let tmp = tempfile::TempDir::new().unwrap();
+        tokio::fs::write(
+            tmp.path().join("cubtera_dim_dc.json"),
+            json!({"dim_dc_name": "stg1-use2"}).to_string(),
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            tmp.path().join("cubtera_outputs.json"),
+            json!({"dim_dc_name": {"value": "stg1-use2", "type": "string"}}).to_string(),
+        )
+        .await
+        .unwrap();
+
+        let strategy = TerraformRunner::new(None);
+        let unit = unit().with_temp_folder(tmp.path());
+        let ctx = RunContext::new(tmp.path().to_path_buf());
+        strategy.transform_files(&unit, &ctx).await.unwrap();
+
+        assert!(tmp.path().join("cubtera_dim_dc.auto.tfvars.json").exists());
+        // Untouched: not renamed, and not counted toward the generated
+        // variable declarations.
+        assert!(tmp.path().join("cubtera_outputs.json").exists());
+        let vars = tokio::fs::read_to_string(tmp.path().join("cubtera_vars.tf"))
+            .await
+            .unwrap();
+        assert_eq!(vars.matches("variable \"dim_dc_name\"").count(), 1);
     }
 
     #[test]

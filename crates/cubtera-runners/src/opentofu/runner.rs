@@ -7,9 +7,12 @@
 //! TODO: Add version management (tofuswitch) similar to terraform
 
 use async_trait::async_trait;
-use cubtera_core::error::AppResult;
-use cubtera_core::ports::{CopyConfig, PrepareMode, RunContext, RunnerStrategy};
-use cubtera_domain::{RunParams, Unit};
+use cubtera_core::error::{AppError, AppResult};
+use cubtera_core::ports::{
+    CopyConfig, PrepareMode, ProcessRunner, ProcessSpec, RunContext, RunnerStrategy,
+};
+use cubtera_domain::{flatten_tf_outputs, RunParams, Unit};
+use serde_json::Value;
 use std::path::PathBuf;
 use tracing::info;
 
@@ -94,6 +97,36 @@ impl RunnerStrategy for OpenTofuRunner {
             ("TF_IN_AUTOMATION".to_string(), "true".to_string()),
             ("TF_INPUT".to_string(), "0".to_string()),
         ]
+    }
+
+    async fn collect_outputs(
+        &self,
+        _unit: &Unit,
+        ctx: &RunContext,
+        process: &dyn ProcessRunner,
+    ) -> AppResult<()> {
+        let binary = ctx
+            .get_metadata("runner")
+            .and_then(|v| v.get("binary"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("tofu");
+
+        let spec = ProcessSpec::shell(
+            &format!("{binary} output -json > cubtera_outputs.json"),
+            ctx.working_dir.clone(),
+        );
+        let output = process.exec(&spec).await?;
+        if !output.success() {
+            return Err(AppError::runner(format!(
+                "'{binary} output -json' failed with exit code {}",
+                output.exit_code
+            )));
+        }
+        Ok(())
+    }
+
+    fn normalize_outputs(&self, raw: &Value) -> Value {
+        flatten_tf_outputs(raw)
     }
 }
 

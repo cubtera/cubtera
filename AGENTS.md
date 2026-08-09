@@ -31,6 +31,21 @@ If you're migrating a v1 deployment, see the [migration guide](.github/docs/migr
   stdio transport, exposing read-only inventory/unit/dlog query tools -
   no `run`/write tools). Postgres is not planned; it was dropped from the
   design entirely.
+- **Wave 2.1 (done): cross-unit state mesh.** Producers opt in with
+  `[outputs] publish = true`; after a successful `apply`/`destroy`, `tf`/
+  `tofu` runners capture `<binary> output -json`, flatten it
+  (`flatten_tf_outputs`), and publish it to a `UnitStateRepository`
+  (fs-json default at `unitStatePath`, `MongoUnitStateRepository` opt-in via
+  `[unitState]`). Consumers declare `[inputs.<alias>]` (producer unit name,
+  optional explicit `dims`/`ext`, `required` default `true`); `UnitService`
+  projects the consumer's own resolved dimension chain onto the producer's
+  required dimensions (`cubtera_domain::project_state_key` - deliberately
+  not a DAG, no auto-run of the producer, no fan-out fallback) and
+  materializes the result as `cubtera_in_<alias>.json` (plus an aggregate
+  `cubtera_inputs.json`) in the consumer's temp folder; `BashRunner` also
+  exposes each alias as a `CUBTERA_IN_<ALIAS>` env var. Read-only access
+  outside a run: `cubtera state get/ls/rm`, `GET
+  /v1/{org}/units/{name}/state`, and the MCP `get_unit_state` tool.
 
 ---
 
@@ -47,8 +62,9 @@ cubtera/
 │   ├── cubtera-domain/         # Pure business logic, only `serde_json` + `std` as deps
 │   │   └── src/
 │   │       ├── dimension.rs    # DimType, RawDimension, Dimension, DimHierarchy, gap_fill_merge, sha256_of_*
-│   │       ├── unit.rs         # Unit entity: temp folder, materialize(), dim_tree()
-│   │       ├── manifest.rs     # Manifest (TOML schema), RunnerType, Spec
+│   │       ├── unit.rs         # Unit entity: temp folder, materialize(), dim_tree(), resolved_inputs -> cubtera_in_*.json
+│   │       ├── unit_state.rs   # UnitStateKey/Record, project_state_key(), flatten_tf_outputs() (cross-unit state mesh)
+│   │       ├── manifest.rs     # Manifest (TOML schema), RunnerType, Spec, InputSpec/OutputsSpec ([inputs]/[outputs])
 │   │       ├── access.rs       # AccessPolicy::evaluate -> AccessDecision (Allowed/Denied)
 │   │       ├── materialization.rs # MaterializationPlan (copy/symlink/write ops), --dry-run printing
 │   │       ├── runner.rs       # RunParams, RunResult, StatePath, render_state_backend_config (handlebars)
@@ -63,12 +79,13 @@ cubtera/
 │   │       │   ├── repository.rs    # UnitRepository (manifests)
 │   │       │   ├── runner.rs        # RunnerStrategy, RunnerFactory, RunContext, PrepareMode, CopyConfig
 │   │       │   ├── process.rs       # ProcessRunner, ProcessSpec, ProcessOutput
-│   │       │   ├── workspace.rs     # Workspace (executes a MaterializationPlan)
-│   │       │   └── deployment_log.rs# DeploymentLogRepository + entry_matches/matches_all_dimensions query helpers
+│   │       │   ├── workspace.rs     # Workspace (executes a MaterializationPlan) + read_file (for collect_outputs)
+│   │       │   ├── deployment_log.rs# DeploymentLogRepository + entry_matches/matches_all_dimensions query helpers
+│   │       │   └── unit_state.rs    # UnitStateRepository (get/put/delete/list published outputs)
 │   │       ├── services/
 │   │       │   ├── dimension.rs     # DimensionService: assembles Dimension from RawDimension + defaults + parent chain
-│   │       │   ├── unit.rs          # UnitService: builds Unit, applies AccessPolicy
-│   │       │   └── run.rs           # RunService: owns the runner pipeline (see below)
+│   │       │   ├── unit.rs          # UnitService: builds Unit, applies AccessPolicy, resolves [inputs] via UnitStateRepository
+│   │       │   └── run.rs           # RunService: owns the runner pipeline (see below), publishes [outputs] after apply/destroy
 │   │       ├── app.rs                # App / AppBuilder - composition root, wires everything
 │   │       └── error.rs              # AppError + AppResult, mapped to exit codes/HTTP status at the edges
 │   │
@@ -79,23 +96,24 @@ cubtera/
 │   │       │   ├── dimension.rs      # FsInventoryRepository - implements the naming convention below
 │   │       │   ├── unit.rs           # FsUnitRepository - reads manifest.toml
 │   │       │   ├── workspace.rs      # FsWorkspace - applies a MaterializationPlan with tokio::fs
-│   │       │   └── deployment_log.rs # FsDeploymentLogRepository - one append-only `{org}.jsonl` file per org
-│   │       ├── mongodb.rs          # MongoInventoryRepository + MongoDeploymentLogRepository, contract-tested
-│   │       └── factory.rs          # Repositories::from_config - picks fs vs mongo (inventory + dlog independently) from Config
+│   │       │   ├── deployment_log.rs # FsDeploymentLogRepository - one append-only `{org}.jsonl` file per org
+│   │       │   └── unit_state.rs     # FsUnitStateRepository - one outputs.json per {org}/{unit}/{dims}/{ext}
+│   │       ├── mongodb.rs          # MongoInventoryRepository + MongoDeploymentLogRepository + MongoUnitStateRepository, contract-tested
+│   │       └── factory.rs          # Repositories::from_config - picks fs vs mongo (inventory/dlog/unit_state independently) from Config
 │   │
 │   ├── cubtera-runners/         # RunnerStrategy implementations
 │   │   └── src/
-│   │       ├── terraform/       # TerraformRunner: tfvars, cubtera_vars.tf, backend HCL, init-lock, tfswitch
+│   │       ├── terraform/       # TerraformRunner: tfvars, cubtera_vars.tf, backend HCL, init-lock, tfswitch, collect_outputs
 │   │       ├── opentofu/        # OpenTofuRunner: same shape, no forced tfswitch dependency
-│   │       ├── bash/            # BashRunner: no version/backend concerns, just execute
-│   │       ├── helm/            # HelmRunner: renders values.yaml.tpl (handlebars) from cubtera_*.json, then `helm ...`
+│   │       ├── bash/            # BashRunner: no version/backend concerns, just execute; exposes [inputs] as CUBTERA_IN_<ALIAS>
+│   │       ├── helm/            # HelmRunner: renders values.yaml.tpl (handlebars) from cubtera_*.json (incl. cubtera_in_*.json), then `helm ...`
 │   │       ├── process.rs       # TokioProcessRunner (ProcessRunner via tokio::process, inherited stdio)
 │   │       └── factory.rs       # DefaultRunnerFactory
 │   │
 │   ├── cubtera-config/          # Config, ConfigProvider/ConfigSource (injectable path+env sources)
 │   │
 │   │ ─────────── INTERFACE LAYER ───────────
-│   ├── cubtera/                 # CLI (binary: `cubtera`) - commands/{run,im,config,log}.rs
+│   ├── cubtera/                 # CLI (binary: `cubtera`) - commands/{run,im,config,log,state}.rs
 │   ├── cubtera-api/             # REST API (binary: `cubtera-api`), Axum, auth middleware, problem+json
 │   └── cubtera-mcp/             # MCP server (binary: `cubtera-mcp`), rmcp SDK, stdio transport, read-only tools
 │
@@ -134,6 +152,7 @@ use tokio::fs; // never in cubtera-domain
 | `ProcessRunner` | `TokioProcessRunner` |
 | `RunnerStrategy` (+ `RunnerFactory`) | `TerraformRunner`, `OpenTofuRunner`, `BashRunner`, `HelmRunner` via `DefaultRunnerFactory` |
 | `DeploymentLogRepository` | `FsDeploymentLogRepository` (default, `deploymentLogPath`), `MongoDeploymentLogRepository` (selected by setting `[deploymentLog]` in `config.toml`) |
+| `UnitStateRepository` | `FsUnitStateRepository` (default, `unitStatePath`), `MongoUnitStateRepository` (selected by setting `[unitState]` in `config.toml`) |
 
 `InventoryRepository` is deliberately "dumb": it returns `RawDimension`
 (sections keyed by name, plus includes) with **zero** business logic -  no
@@ -247,15 +266,63 @@ full `key_path` set of the resolved dimensions, so a bare `"stg1"` will never
 match and every run gets denied. See `example/units/*/manifest.toml` for
 correct examples.
 
+### Cross-unit state (`[inputs]`/`[outputs]`)
+
+A unit can publish its outputs for other units to consume, without a DAG or
+any auto-run of the producer:
+
+- **Producer**: `[outputs] publish = true` - explicit opt-in, `false` by
+  default. Publishing only fires when the command's first word is `apply`
+  or `destroy` (`RunService::should_log_command` - same gate as the
+  deployment log) *and* that run exited `0`; `init`/`plan`/anything else
+  never publishes. When it fires, `RunService` calls
+  `RunnerStrategy::collect_outputs` (for `tf`/`tofu`, this runs `<binary>
+  output -json > cubtera_outputs.json` as a fresh process, after the run's
+  own process has already exited), reads the file back via
+  `Workspace::read_file`, normalizes it (`flatten_tf_outputs` for tf/tofu -
+  `{name: {value, type, sensitive}}` -> `{name: value}`), and `put`s it into
+  the configured `UnitStateRepository`, keyed by the producer's own
+  `dimensions`/extensions (filtered to the manifest's *required* dims -
+  optional dims/extra `-d` overrides passed on the CLI are not part of the
+  key). Best-effort: a publish failure (or a missing file) only warns, it
+  never fails the run. `RunnerStrategy::collect_outputs`/`normalize_outputs`
+  default to a no-op/passthrough - `BashRunner`/`HelmRunner` don't
+  auto-generate `cubtera_outputs.json`, so a bash/helm producer must write
+  it itself (already flat `{name: value}` JSON), typically via
+  `[runner] outlet_command = "..."` in its manifest; if `publish = true`
+  but the file never shows up, you'll see a `... was not written` warning
+  and nothing gets stored. `destroy` re-runs the same collection and
+  *overwrites* (upserts) the existing record - it does not delete it; use
+  `cubtera state rm` if you want the record gone after a teardown.
+- **Consumer**: `[inputs.<alias>]` names a producer unit and, optionally,
+  explicit `dims`/`ext`; left unset, `UnitService` projects the consumer's
+  own resolved `dim_key_path` onto the producer's required `dimensions`
+  (`cubtera_domain::project_state_key`) to find the exact key the producer
+  published under. A producer dimension type the consumer never resolved,
+  or an ambiguous match, is a hard error - never a guess. `required`
+  (default `true`) controls whether a missing producer state fails the
+  consumer's run. Resolved inputs are materialized as
+  `cubtera_in_<alias>.json` (`{"in_<alias>": {...}}`) plus an aggregate
+  `cubtera_inputs.json` (`{<alias>: {...}}`) in the consumer's temp folder;
+  `BashRunner` additionally exposes each alias as a `CUBTERA_IN_<ALIAS>`
+  env var (JSON-encoded), and `HelmRunner`'s `values.yaml.tpl` sees them for
+  free since it merges every `cubtera_*.json` file in the temp folder.
+  See `example/units/tf_unit02` (producer) and `example/units/bash_unit01`
+  (consumer, `[inputs.infra]`) for a working example.
+- Read-only inspection outside a run: `cubtera state get/ls/rm`, `GET
+  /v1/{org}/units/{name}/state`, MCP `get_unit_state` - all read the exact
+  `dims`/`ext` key you give them, not a consumer's projected key.
+
 ### MaterializationPlan
 
 `Unit::materialize(modules_path, ext)` returns a `MaterializationPlan`: a
 list of copy/symlink/write operations (unit files, `.default` includes,
-`cubtera_dim_{type}.json`, `cubtera_ext.json`, module symlink) computed with
+`cubtera_dim_{type}.json`, `cubtera_ext.json`, module symlink, resolved
+`[inputs]` as `cubtera_in_*.json`/`cubtera_inputs.json`) computed with
 **zero I/O**. `Workspace::apply` (implemented by `FsWorkspace`) is the only
-thing that actually touches disk. `cubtera run --dry-run` prints the plan
-without applying it - use this to debug unit wiring without touching a temp
-folder.
+thing that actually touches disk. `cubtera run --dry-run` prints the
+resolved inputs (if any) and the plan without applying it - use this to
+debug unit wiring without touching a temp folder.
 
 ### Runner pipeline
 
@@ -268,6 +335,7 @@ prepare (clean+materialize, or require existing temp folder)
   -> strategy.execute            (binary + args + env via ProcessRunner)
   -> outlet hook                 (manifest.runner.outlet_command)
   -> deployment log              (only for apply/destroy; best-effort, never fails the run)
+  -> publish [outputs]           (only for apply/destroy, only if publish = true; best-effort)
   -> optional cache cleanup
 ```
 
@@ -329,6 +397,11 @@ cubtera run -u <unit> -d <type:name> [-d <type:name>...] [-e <type:name>] [--dry
 
 # Deployment log
 cubtera log get -q <key:value> [-q ...] [--limit N]
+
+# Unit state (cross-unit outputs) - exact dims/ext key, not a consumer's projection
+cubtera state get -u <unit> [-d <type:name>...] [-e <type:name>...]
+cubtera state ls -u <unit>
+cubtera state rm -u <unit> [-d <type:name>...] [-e <type:name>...]
 ```
 
 `im sync*` always reads from the FS inventory at `inventoryPath` and writes
@@ -363,6 +436,7 @@ GET /v1/{org}/dims/{dim_type}/{name}/parent
 GET /v1/{org}/dims/{dim_type}/{name}/children
 GET /v1/{org}/units
 GET /v1/{org}/units/{name}
+GET /v1/{org}/units/{name}/state?dims=<type:name>[,...]&ext=<type:name>[,...]
 GET /v1/{org}/dlog?q=<key:value>[,<key:value>...]&limit=<N>
 ```
 
@@ -373,11 +447,12 @@ SDK, stdio transport) - not the REST-shaped prototype `test1` had. It exposes
 the same read-only queries as the REST API (`list_orgs`, `list_dim_types`,
 `list_dimension_names`, `get_dimension`, `get_dimension_defaults`,
 `get_dimension_schema`, `get_dimension_parent`, `get_dimension_children`,
-`validate_dimension`, `list_units`, `get_unit_manifest`,
+`validate_dimension`, `list_units`, `get_unit_manifest`, `get_unit_state`,
 `get_deployment_log`) as MCP tools, through `DimensionService`/`UnitService`/
-`DeploymentLogRepository` directly (no `App`/`RunService` - it never runs
-infrastructure commands, deliberately: giving an MCP client the ability to
-apply changes is a product decision this migration doesn't make for you).
+`DeploymentLogRepository`/`UnitStateRepository` directly (no `App`/
+`RunService` - it never runs infrastructure commands, deliberately: giving
+an MCP client the ability to apply changes is a product decision this
+migration doesn't make for you).
 
 ```bash
 cubtera-mcp --config example/config.toml   # speaks MCP over stdio
@@ -396,6 +471,12 @@ whole-table replacement). Keys accept camelCase or snake_case. See
 `example/config.toml` for a fully-annotated example and
 `crates/cubtera-config/src/config.rs` for the loader
 (`ConfigProvider`/`ConfigSource` - injectable so tests don't touch real env vars).
+
+`unitStatePath` (default `~/.cubtera/state`) is the fs-json
+`UnitStateRepository` root, used unless `[unitState]` (a `MongoUnitStateRepository`
+connection string/database/collection, same shape as `[deploymentLog]`) is
+set - independent of which backend `run`/`im get*` are pointed at, same as
+`deploymentLogPath`/`[deploymentLog]`.
 
 ---
 
@@ -416,7 +497,8 @@ cargo test -p cubtera-persistence --test golden_inventory
 # they skip themselves (without failing) if this isn't set
 CUBTERA_TEST_MONGO_URL=mongodb://127.0.0.1:27017 \
   cargo test -p cubtera-persistence --features mongodb \
-  --test inventory_contract_mongo --test deployment_log_contract_mongo
+  --test inventory_contract_mongo --test deployment_log_contract_mongo \
+  --test unit_state_contract_mongo
 
 # Run the CLI / API / MCP server against the example fixture
 cargo run -p cubtera -- -c example/config.toml im get-all dc
@@ -428,8 +510,9 @@ The `cubtera`/`cubtera-api` binaries always compile in the `mongodb` feature
 of `cubtera-persistence` (it's a hard `Cargo.toml` dependency feature, not a
 cargo feature of their own) - `cargo build --workspace` alone is enough to
 build Mongo support in, `CUBTERA_DB=mongodb://... cubtera ...` switches
-`InventoryRepository` to it at runtime, and setting `[deploymentLog]` in
-`config.toml` does the same for `DeploymentLogRepository`.
+`InventoryRepository` to it at runtime, and setting `[deploymentLog]`/
+`[unitState]` in `config.toml` does the same for `DeploymentLogRepository`/
+`UnitStateRepository`.
 
 ---
 
@@ -482,4 +565,5 @@ src/
 7. **English only in code** - comments, docs, identifiers.
 8. **Rust 2018+ module style** - `module.rs` + `module/`, not `module/mod.rs`.
 9. **Runner pipeline** - add a new runner type by implementing `RunnerStrategy`, not by touching `RunService`.
-10. **New MCP tools go in `crates/cubtera-mcp/src/server.rs`** as `#[tool]` methods on `CubteraMcp`, calling `DimensionService`/`UnitService`/`DeploymentLogRepository` - never add a `run`/write tool there without an explicit, separate decision to do so.
+10. **New MCP tools go in `crates/cubtera-mcp/src/server.rs`** as `#[tool]` methods on `CubteraMcp`, calling `DimensionService`/`UnitService`/`DeploymentLogRepository`/`UnitStateRepository` - never add a `run`/write tool there without an explicit, separate decision to do so.
+11. **`[inputs.<alias>]`/`[outputs]` are not a DAG** - a consumer's `[inputs]` never auto-runs the producer, and `project_state_key` never invents a dimension the consumer didn't resolve or guesses on ambiguity - both are hard `AppError`s, not silent fallbacks. Keep it that way when touching `cubtera-domain::unit_state` or `UnitService::resolve_inputs`.

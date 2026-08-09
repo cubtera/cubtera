@@ -44,6 +44,10 @@ enum Commands {
     /// Deployment log commands
     #[command(subcommand)]
     Log(commands::log::LogCommands),
+
+    /// Unit state (cross-unit outputs) commands
+    #[command(subcommand)]
+    State(commands::state::StateCommands),
 }
 
 #[tokio::main]
@@ -89,6 +93,7 @@ async fn main() {
         Commands::Im(cmd) => commands::im::run(&config, &ctx, cmd).await,
         Commands::Run(args) => commands::run::run(&config, args).await,
         Commands::Log(cmd) => commands::log::run(&config, &ctx, cmd).await,
+        Commands::State(cmd) => commands::state::run(&config, &ctx, cmd).await,
     };
 
     if let Err(e) = result {

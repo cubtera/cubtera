@@ -44,6 +44,14 @@ impl Workspace for FsWorkspace {
         }
         Ok(())
     }
+
+    async fn read_file(&self, path: &Path) -> AppResult<Option<String>> {
+        match tokio::fs::read_to_string(path).await {
+            Ok(content) => Ok(Some(content)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(AppError::io(format!("failed to read {:?}: {e}", path))),
+        }
+    }
 }
 
 async fn apply_step(step: &MaterializationStep) -> AppResult<()> {
@@ -293,5 +301,24 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let temp_folder = tmp.path().join("does-not-exist");
         FsWorkspace::new().clean(&temp_folder).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_file_returns_content_when_present() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("cubtera_outputs.json");
+        tokio::fs::write(&path, "{}").await.unwrap();
+
+        let content = FsWorkspace::new().read_file(&path).await.unwrap();
+        assert_eq!(content, Some("{}".to_string()));
+    }
+
+    #[tokio::test]
+    async fn read_file_returns_none_when_missing() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("does-not-exist.json");
+
+        let content = FsWorkspace::new().read_file(&path).await.unwrap();
+        assert_eq!(content, None);
     }
 }

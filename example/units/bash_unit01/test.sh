@@ -21,6 +21,14 @@ else
 fi
 echo
 
+echo "--- cross-unit state: tf_unit02's published outputs (cubtera_in_infra.json) ---"
+if [ -f cubtera_in_infra.json ]; then
+  cat cubtera_in_infra.json
+else
+  echo "(missing - run 'cubtera run -u tf_unit02 -d dc:stg1-use2 -- apply' first, tf_unit02 declares [outputs] publish = true)"
+fi
+echo
+
 echo "--- required include (greeting.txt) ---"
 cat greeting.txt
 echo

@@ -124,6 +124,31 @@ All dimension routes are scoped under an org: `/v1/{org}/...`.
 
 - `GET /v1/{org}/units/{name}` — the unit's manifest (parsed `manifest.toml`), as JSON. This is the manifest only — it does not resolve dimensions, run access policy, or materialize anything (that's `cubtera run`'s job).
 
+- `GET /v1/{org}/units/{name}/state?dims=<type:name>[,<type:name>...]&ext=<type:name>[,...]`
+  — a producer unit's published outputs (`[outputs] publish = true`), for
+  the **exact** `dims`/`ext` it ran with — not a consumer's `[inputs]`
+  projection (`cubtera_domain::project_state_key`), which only happens
+  inside `cubtera run`. 404 if nothing has been published under that key.
+  Reads through whichever `UnitStateRepository` the server is configured
+  with (fs-json by default, MongoDB if `[unitState]` is set) — same backend
+  as `cubtera state get`.
+
+  ```bash
+  curl -H "x-api-key: $CUBTERA_API_KEY" \
+    "http://localhost:8080/v1/cubtera/units/network/state?dims=dome:prod"
+  ```
+
+  ```json
+  {
+    "org": "cubtera",
+    "unit": "network",
+    "dims": ["dome:prod"],
+    "ext": [],
+    "outputs": { "vpc_id": "vpc-123" },
+    "updated_at": 1700000000
+  }
+  ```
+
 ### Deployment log
 
 - `GET /v1/{org}/dlog?q=<key:value>[,<key:value>...]&limit=<N>` — query
