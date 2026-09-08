@@ -8,8 +8,8 @@
 //! command built on `cubtera-app` (P3); see
 //! docs/specs/2026-09-03-cubtera-v3-architecture.md section 3/section 10.
 
+use super::run_support::{inventory_port, unit_port};
 use super::Ctx;
-use crate::app_bridge::InventoryPortBridge;
 use crate::exec_bridge::ExecutorBridge;
 use clap::Args;
 use cubtera_app::ports::Executor;
@@ -17,9 +17,7 @@ use cubtera_app::{load_dim_graph, ResolveUseCase, ValidateUseCase};
 use cubtera_config::Config;
 use cubtera_kernel::Ident;
 use cubtera_model::ModelError;
-use cubtera_persistence::Repositories;
 use serde_json::json;
-use std::sync::Arc;
 
 #[derive(Args)]
 pub struct ValidateArgs {
@@ -34,9 +32,7 @@ pub async fn run(
     ctx: &Ctx,
     args: ValidateArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let repos = Repositories::from_config(config).await?;
-    let inventory: Arc<dyn cubtera_app::InventoryPort> =
-        Arc::new(InventoryPortBridge::new(repos.inventory));
+    let inventory = inventory_port(config);
 
     let full_chain: Vec<Ident> = config
         .dim_relations
@@ -107,13 +103,13 @@ pub async fn run(
 async fn validate_unit_runner_contracts(
     config: &Config,
 ) -> Result<(usize, Vec<String>), Box<dyn std::error::Error>> {
-    let repos = Repositories::from_config(config).await?;
+    let units = unit_port(config);
     let executor = ExecutorBridge::new(std::env::temp_dir(), std::env::temp_dir());
 
-    let unit_names = repos.units.list_units(&config.org).await?;
+    let unit_names = units.list_units(&config.org).await?;
     let mut errors = Vec::new();
     for unit_name in &unit_names {
-        let Some(manifest) = repos.units.find_manifest(&config.org, unit_name).await? else {
+        let Some(manifest) = units.find_manifest(&config.org, unit_name).await? else {
             continue;
         };
         if !manifest.publishes_outputs() {

@@ -1,7 +1,7 @@
 //! Bridges v3's `cubtera_app::ports::Executor` onto `cubtera-exec`'s
 //! `RunnerStrategy`/`ProcessRunner`/`Workspace`.
 //!
-//! Same rationale and shape as `app_bridge::InventoryPortBridge` (P3):
+//! Same rationale and shape as `run_support::inventory_port` (P3/P7):
 //! `cubtera-app` cannot depend on `cubtera-exec` directly (see the crate
 //! table in docs/specs/2026-09-03-cubtera-v3-architecture.md §3), so this
 //! is the one place that actually owns a concrete `RunnerStrategy` and

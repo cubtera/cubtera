@@ -9,7 +9,6 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 use cubtera_kernel::{DimRef, InstanceId};
 use cubtera_model::{Binding, Selector};
-use cubtera_persistence::Repositories;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -47,8 +46,7 @@ pub async fn status(
         .collect::<Result<_, _>>()
         .map_err(cubtera_app::AppError::from)?;
 
-    let repos = Repositories::from_config(&state.config).await?;
-    let binding_uc = build_binding_use_case(&state.config, &repos)?;
+    let binding_uc = build_binding_use_case(&state.config)?;
     let report = binding_uc.status(&org, &binding).await?;
 
     let items: Vec<_> = report

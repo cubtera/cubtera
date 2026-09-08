@@ -1,41 +1,62 @@
 //! Shared plumbing for `cubtera plan`/`cubtera apply`/`cubtera explain run`
-//! (v3, P4-run).
+//! (v3, P4-run/P7-rewire).
 //!
-//! v2's `commands/run.rs` builds a `Unit` (access policy, dimension data,
-//! `[inputs]` resolution) and then hands it straight to `RunService`.
-//! Here, building the `Unit` (still v2's `UnitService`, unchanged - the
-//! inventory/manifest layer isn't being replaced in P4) is only step one:
-//! its resolved dimensions become an `InstanceId`, its materialized files
-//! become the real workspace `cubtera-app::RunUseCase` executes against,
-//! and its manifest is what tells the CLI which `runner_type` and
-//! `[outputs]` settings to hand to the use case. Everything past that -
-//! the actual `plan`/`apply` pipeline - lives in `cubtera-app`, not here;
-//! this module's only job is gathering the raw inputs it needs.
+//! Every port here is v3-native (`cubtera_inventory::{FsInventoryPort,
+//! FsUnitPort}`, `cubtera_app::AssembleUseCase`,
+//! `cubtera_exec::apply_materialization_plan`) - no `cubtera-core`/
+//! `cubtera-persistence`/`cubtera-domain` dependency left in this module.
+//! `AssembleUseCase::build_unit_with_extensions` replaces v2's
+//! `UnitService::build_unit_with_extensions` (dimension resolution +
+//! `AccessPolicy` + includes aggregation), and
+//! `cubtera_exec::apply_materialization_plan` replaces v2's
+//! `FsWorkspace::apply` - both proven at parity against v2's behavior by
+//! their own unit/golden tests (see `crates/cubtera-app/src/assemble.rs`,
+//! `crates/cubtera-inventory/tests/golden_fixture.rs`).
+//!
+//! The resolved unit's manifest is what tells the CLI which `runner_type`
+//! and `[outputs]` settings to hand to `cubtera-app::RunUseCase` - the
+//! actual `plan`/`apply` pipeline lives there, not here; this module's job
+//! is gathering the raw inputs it needs.
 
-use crate::app_bridge::InventoryPortBridge;
 use crate::exec_bridge::ExecutorBridge;
 use cubtera_app::ports::{Executor, IdentityProvider, SystemClock};
-use cubtera_app::{BindingUseCase, InputRequest, InventoryPort, ResolveUseCase, RunUseCase};
+use cubtera_app::{
+    AssembleUseCase, BindingUseCase, InputRequest, InventoryPort, ResolveUseCase, RunUseCase,
+    UnitPort,
+};
 use cubtera_config::Config;
-use cubtera_core::ports::Workspace as _;
-use cubtera_core::services::{DimensionService, UnitService};
-use cubtera_domain::{project_state_key, Unit};
 use cubtera_identity::EnvIdentityProvider;
+use cubtera_inventory::{FsInventoryPort, FsUnitPort};
 use cubtera_kernel::{Digest, DimRef, Ident, InstanceId};
-use cubtera_persistence::fs::FsWorkspace;
-use cubtera_persistence::Repositories;
+use cubtera_model::{project_state_key, Unit};
 use cubtera_source::FsSource;
 use cubtera_store::SqliteStore;
 use std::sync::Arc;
 
 /// Everything a `plan`/`apply` command needs after resolving CLI args
-/// against the inventory/manifest: the materialized v2 `Unit` (for
+/// against the inventory/manifest: the materialized v3 `Unit` (for
 /// `runner_type`/`[outputs]`/human-readable printing) plus the
-/// `InstanceId`/`RunUseCase` v3's pipeline actually runs against.
+/// `InstanceId`/`RunUseCase` the pipeline actually runs against.
 pub struct PreparedRun {
     pub unit: Unit,
     pub instance: InstanceId,
     pub use_case: RunUseCase,
+}
+
+/// The FS-backed `InventoryPort`, rooted at `config.inventory_path` - the
+/// same construction v2's `Repositories::from_config` used for
+/// `FsInventoryRepository`, just without a `cubtera-persistence`
+/// dependency in between.
+pub fn inventory_port(config: &Config) -> Arc<dyn InventoryPort> {
+    Arc::new(
+        FsInventoryPort::new(config.inventory_path.clone())
+            .with_separator(config.file_name_separator.clone()),
+    )
+}
+
+/// The FS-backed `UnitPort`, rooted at `config.units_path`.
+pub fn unit_port(config: &Config) -> Arc<dyn UnitPort> {
+    Arc::new(FsUnitPort::new(config.units_path.clone()))
 }
 
 /// Wire a `RunUseCase` against the real inventory/source/store/executor
@@ -46,12 +67,9 @@ pub struct PreparedRun {
 /// up actually executing something; `explain` never does.
 pub fn build_use_case(
     config: &Config,
-    repos: &Repositories,
     executor_workspace_root: std::path::PathBuf,
 ) -> Result<RunUseCase, Box<dyn std::error::Error>> {
-    let inventory: Arc<dyn InventoryPort> =
-        Arc::new(InventoryPortBridge::new(repos.inventory.clone()));
-    let resolve = ResolveUseCase::new(inventory);
+    let resolve = ResolveUseCase::new(inventory_port(config));
     let source: Arc<dyn cubtera_source::SourceRepo> = Arc::new(FsSource::new(&config.units_path));
     let store: Arc<dyn cubtera_store::Store> = Arc::new(SqliteStore::open(&config.store_path)?);
     let tf_cache_dir = config
@@ -71,24 +89,23 @@ pub fn build_use_case(
 
 /// Build the `InputRequest`s a `plan`/`apply` call should carry for
 /// `unit`'s `[inputs.<alias>]` entries - the v3-side equivalent of
-/// `UnitService::resolve_inputs` (`crates/cubtera-core/src/services/unit.rs`),
+/// `UnitService::resolve_inputs` (v2, `crates/cubtera-core/src/services/unit.rs`),
 /// projecting each producer's required dimensions onto `unit`'s own
 /// resolved chain when the manifest doesn't name them explicitly. Returns
 /// `vec![]` for a manifest with no `[inputs]` at all.
 pub async fn build_input_requests(
     config: &Config,
-    repos: &Repositories,
     unit: &Unit,
 ) -> Result<Vec<InputRequest>, Box<dyn std::error::Error>> {
     let org = Ident::parse(&config.org)?;
+    let units = unit_port(config);
     let mut requests = Vec::with_capacity(unit.manifest.inputs.len());
 
     for (alias, spec) in &unit.manifest.inputs {
         let dims = match &spec.dims {
             Some(explicit) => explicit.clone(),
             None => {
-                let producer_manifest = repos
-                    .units
+                let producer_manifest = units
                     .find_manifest(&config.org, &spec.unit)
                     .await?
                     .ok_or_else(|| format!("unit '{}' not found", spec.unit))?;
@@ -132,11 +149,8 @@ pub async fn build_input_requests(
 /// `InstanceId` from for an ad hoc `plan`/`apply`.
 pub fn build_binding_use_case(
     config: &Config,
-    repos: &Repositories,
 ) -> Result<BindingUseCase, Box<dyn std::error::Error>> {
-    let inventory: Arc<dyn InventoryPort> =
-        Arc::new(InventoryPortBridge::new(repos.inventory.clone()));
-    let resolve = ResolveUseCase::new(inventory);
+    let resolve = ResolveUseCase::new(inventory_port(config));
     let source: Arc<dyn cubtera_source::SourceRepo> = Arc::new(FsSource::new(&config.units_path));
     let store: Arc<dyn cubtera_store::Store> = Arc::new(SqliteStore::open(&config.store_path)?);
     let leaf_dim_type = config
@@ -151,34 +165,31 @@ pub fn build_binding_use_case(
     ))
 }
 
-/// Resolve `unit_name`/`dimensions`/`extensions`, materialize the unit's
-/// files onto disk (same `FsWorkspace`/`MaterializationPlan` v2's `run`
-/// command uses), and wire a `RunUseCase` against the real
-/// inventory/source/store/executor adapters, scoped to this unit's
-/// materialized workspace.
+/// Resolve `unit_name`/`dimensions`/`extensions` through `AssembleUseCase`,
+/// materialize the unit's files onto disk (`cubtera_exec::apply_materialization_plan`,
+/// the v3-native equivalent of v2's `FsWorkspace::apply`), and wire a
+/// `RunUseCase` against the real inventory/source/store/executor adapters,
+/// scoped to this unit's materialized workspace.
 pub async fn prepare(
     config: &Config,
     unit_name: &str,
     dimensions: &[String],
     extensions: &[String],
 ) -> Result<PreparedRun, Box<dyn std::error::Error>> {
-    let repos = Repositories::from_config(config).await?;
-    let hierarchy = Repositories::hierarchy(config);
-    let dimensions_service = Arc::new(DimensionService::new(repos.inventory.clone(), hierarchy));
-    let unit_service = UnitService::new(repos.units.clone(), dimensions_service);
+    let assemble = AssembleUseCase::new(inventory_port(config), unit_port(config));
 
-    let mut unit = unit_service
+    let mut unit = assemble
         .build_unit_with_extensions(&config.org, unit_name, dimensions, extensions)
         .await?;
     let temp_folder = unit.calculate_temp_folder(&config.temp_folder_path);
     unit = unit.with_temp_folder(temp_folder);
 
     let plan = unit.materialize(&config.modules_path, None)?;
-    FsWorkspace::new().apply(&plan).await?;
+    cubtera_exec::apply_materialization_plan(&plan).await?;
 
     let mut dim_refs = Vec::new();
     for dim in &unit.dimensions {
-        dim_refs.push(cubtera_kernel::DimRef::parse(&dim.key())?);
+        dim_refs.push(dim.clone());
     }
     let mut ext_refs = Vec::new();
     for ext in extensions {
@@ -191,7 +202,7 @@ pub async fn prepare(
         ext_refs,
     )?;
 
-    let use_case = build_use_case(config, &repos, unit.temp_folder.clone())?;
+    let use_case = build_use_case(config, unit.temp_folder.clone())?;
 
     Ok(PreparedRun {
         unit,

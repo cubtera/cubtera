@@ -9,7 +9,6 @@ use clap::Args;
 use cubtera_app::PlanRequest;
 use cubtera_config::Config;
 use cubtera_kernel::Ident;
-use cubtera_persistence::Repositories;
 
 #[derive(Args)]
 pub struct PlanArgs {
@@ -53,8 +52,7 @@ pub async fn run(
         args.command.clone()
     };
     let actor = args.actor.clone().unwrap_or_else(default_actor);
-    let repos = Repositories::from_config(config).await?;
-    let inputs = build_input_requests(config, &repos, &prepared.unit).await?;
+    let inputs = build_input_requests(config, &prepared.unit).await?;
 
     let plan = prepared
         .use_case

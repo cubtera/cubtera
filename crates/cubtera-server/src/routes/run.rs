@@ -25,7 +25,6 @@ use axum::Json;
 use cubtera_app::{ApplyRequest, PlanRequest};
 use cubtera_kernel::Ident;
 use cubtera_model::{PlanId, RunId};
-use cubtera_persistence::Repositories;
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -66,10 +65,7 @@ pub async fn plan(
     };
     let actor = body.actor.unwrap_or_else(|| actor_from_headers(&headers));
 
-    let repos = Repositories::from_config(&state.config)
-        .await
-        .map_err(ApiError::from)?;
-    let inputs = build_input_requests(&org, &repos, &prepared.unit)
+    let inputs = build_input_requests(&state.config, &org, &prepared.unit)
         .await
         .map_err(ApiError::from)?;
 
@@ -149,10 +145,7 @@ pub async fn apply(
     let outputs_schema_version = semver::Version::parse(&body.outputs_schema_version)
         .map_err(|e| ApiError::bad_request(format!("invalid outputs_schema_version: {e}")))?;
 
-    let repos = Repositories::from_config(&state.config)
-        .await
-        .map_err(ApiError::from)?;
-    let inputs = build_input_requests(&org, &repos, &prepared.unit)
+    let inputs = build_input_requests(&state.config, &org, &prepared.unit)
         .await
         .map_err(ApiError::from)?;
 
@@ -183,15 +176,9 @@ pub async fn explain(
     State(state): State<Arc<AppState>>,
     Path((_org, run_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let repos = Repositories::from_config(&state.config)
-        .await
-        .map_err(ApiError::from)?;
-    let use_case = crate::run_support::build_use_case(
-        &state.config,
-        &repos,
-        state.config.temp_folder_path.clone(),
-    )
-    .map_err(ApiError::from)?;
+    let use_case =
+        crate::run_support::build_use_case(&state.config, state.config.temp_folder_path.clone())
+            .map_err(ApiError::from)?;
 
     let found = use_case.explain(&RunId::new(run_id)).await?;
     Ok(Json(serde_json::to_value(found).map_err(|e| {
@@ -209,15 +196,9 @@ pub async fn log(
 ) -> Result<axum::response::Response, ApiError> {
     use axum::response::IntoResponse;
 
-    let repos = Repositories::from_config(&state.config)
-        .await
-        .map_err(ApiError::from)?;
-    let use_case = crate::run_support::build_use_case(
-        &state.config,
-        &repos,
-        state.config.temp_folder_path.clone(),
-    )
-    .map_err(ApiError::from)?;
+    let use_case =
+        crate::run_support::build_use_case(&state.config, state.config.temp_folder_path.clone())
+            .map_err(ApiError::from)?;
 
     let found = use_case.explain(&RunId::new(run_id.clone())).await?;
     let Some(logs_ref) = &found.logs_ref else {

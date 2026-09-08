@@ -19,6 +19,7 @@ cubtera-store.workspace = true
 cubtera-source.workspace = true
 cubtera-exec.workspace = true
 cubtera-identity.workspace = true
+cubtera-inventory.workspace = true
 cubtera-config.workspace = true
 cubtera-persistence.workspace = true
 cubtera-runners.workspace = true

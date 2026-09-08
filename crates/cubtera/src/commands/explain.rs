@@ -8,7 +8,6 @@ use super::Ctx;
 use clap::{Args, Subcommand};
 use cubtera_config::Config;
 use cubtera_model::RunId;
-use cubtera_persistence::Repositories;
 
 #[derive(Subcommand)]
 pub enum ExplainCommands {
@@ -29,15 +28,11 @@ pub async fn run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
         ExplainCommands::Run(args) => {
-            let repos = Repositories::from_config(config).await?;
             // `explain` never executes anything, so the executor bridge's
             // workspace root is never touched - the configured temp folder
             // is a harmless placeholder.
-            let use_case = super::run_support::build_use_case(
-                config,
-                &repos,
-                config.temp_folder_path.clone(),
-            )?;
+            let use_case =
+                super::run_support::build_use_case(config, config.temp_folder_path.clone())?;
 
             let found = use_case.explain(&RunId::new(args.run_id.clone())).await?;
 

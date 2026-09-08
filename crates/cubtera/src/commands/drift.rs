@@ -11,7 +11,6 @@ use clap::Args;
 use cubtera_app::DriftState;
 use cubtera_config::Config;
 use cubtera_kernel::DimRef;
-use cubtera_persistence::Repositories;
 
 #[derive(Args)]
 pub struct DriftArgs {
@@ -33,7 +32,6 @@ pub async fn run(
     ctx: &Ctx,
     args: DriftArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let repos = Repositories::from_config(config).await?;
     let binding = parse_binding(&args.unit, args.selector.as_deref())?;
     let exclude: Vec<DimRef> = args
         .exclude
@@ -41,7 +39,7 @@ pub async fn run(
         .map(|s| DimRef::parse(s))
         .collect::<Result<_, _>>()?;
 
-    let binding_uc = build_binding_use_case(config, &repos)?;
+    let binding_uc = build_binding_use_case(config)?;
     let report = binding_uc.status(&config.org, &binding).await?;
     let drifted: Vec<_> = report
         .into_iter()

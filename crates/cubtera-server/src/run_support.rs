@@ -1,24 +1,25 @@
 //! Shared plumbing for the server's plan/apply/explain/state routes -
 //! server-side counterpart to `crates/cubtera/src/commands/run_support.rs`
-//! (see its doc comment for the overall shape: v2's `UnitService` still
-//! resolves/materializes the unit, `cubtera-app::RunUseCase` runs it).
-//! The one real difference: every function here takes `org` as an
-//! explicit parameter instead of reading a single `Config::org` - the
-//! server is multi-org the same way `cubtera-api`'s routes already are
-//! (`InventoryRepository` never assumed a single org either).
+//! (see its doc comment for the overall shape: `cubtera_app::AssembleUseCase`
+//! resolves/materializes the unit, `cubtera_app::RunUseCase` runs it - both
+//! v3-native, no `cubtera-core`/`cubtera-persistence`/`cubtera-domain`
+//! dependency here). The one real difference from the CLI's version: every
+//! function here takes `org` as an explicit parameter instead of reading a
+//! single `Config::org` - the server is multi-org the same way
+//! `cubtera-api`'s routes already are (`InventoryRepository` never assumed
+//! a single org either).
 
-use crate::app_bridge::InventoryPortBridge;
 use crate::exec_bridge::ServerExecutor;
 use cubtera_app::ports::{Executor, IdentityProvider, SystemClock};
-use cubtera_app::{BindingUseCase, InputRequest, InventoryPort, ResolveUseCase, RunUseCase};
+use cubtera_app::{
+    AssembleUseCase, BindingUseCase, InputRequest, InventoryPort, ResolveUseCase, RunUseCase,
+    UnitPort,
+};
 use cubtera_config::Config;
-use cubtera_core::ports::Workspace as _;
-use cubtera_core::services::{DimensionService, UnitService};
-use cubtera_domain::{project_state_key, Unit};
 use cubtera_identity::EnvIdentityProvider;
+use cubtera_inventory::{FsInventoryPort, FsUnitPort};
 use cubtera_kernel::{Digest, DimRef, Ident, InstanceId};
-use cubtera_persistence::fs::FsWorkspace;
-use cubtera_persistence::Repositories;
+use cubtera_model::{project_state_key, Unit};
 use cubtera_source::FsSource;
 use cubtera_store::SqliteStore;
 use std::sync::Arc;
@@ -29,14 +30,22 @@ pub struct PreparedRun {
     pub use_case: RunUseCase,
 }
 
+pub fn inventory_port(config: &Config) -> Arc<dyn InventoryPort> {
+    Arc::new(
+        FsInventoryPort::new(config.inventory_path.clone())
+            .with_separator(config.file_name_separator.clone()),
+    )
+}
+
+pub fn unit_port(config: &Config) -> Arc<dyn UnitPort> {
+    Arc::new(FsUnitPort::new(config.units_path.clone()))
+}
+
 pub fn build_use_case(
     config: &Config,
-    repos: &Repositories,
     executor_workspace_root: std::path::PathBuf,
 ) -> Result<RunUseCase, Box<dyn std::error::Error>> {
-    let inventory: Arc<dyn InventoryPort> =
-        Arc::new(InventoryPortBridge::new(repos.inventory.clone()));
-    let resolve = ResolveUseCase::new(inventory);
+    let resolve = ResolveUseCase::new(inventory_port(config));
     let source: Arc<dyn cubtera_source::SourceRepo> = Arc::new(FsSource::new(&config.units_path));
     let store: Arc<dyn cubtera_store::Store> = Arc::new(SqliteStore::open(&config.store_path)?);
     let tf_cache_dir = config
@@ -54,20 +63,23 @@ pub fn build_use_case(
     ))
 }
 
+/// The v3-native equivalent of v2's `UnitService::resolve_inputs` - see
+/// the CLI's `run_support::build_input_requests` doc comment for the
+/// projection logic. `org` is the request-path org, not `config.org`.
 pub async fn build_input_requests(
+    config: &Config,
     org: &str,
-    repos: &Repositories,
     unit: &Unit,
 ) -> Result<Vec<InputRequest>, Box<dyn std::error::Error>> {
     let org_ident = Ident::parse(org)?;
+    let units = unit_port(config);
     let mut requests = Vec::with_capacity(unit.manifest.inputs.len());
 
     for (alias, spec) in &unit.manifest.inputs {
         let dims = match &spec.dims {
             Some(explicit) => explicit.clone(),
             None => {
-                let producer_manifest = repos
-                    .units
+                let producer_manifest = units
                     .find_manifest(org, &spec.unit)
                     .await?
                     .ok_or_else(|| format!("unit '{}' not found", spec.unit))?;
@@ -108,11 +120,8 @@ pub async fn build_input_requests(
 
 pub fn build_binding_use_case(
     config: &Config,
-    repos: &Repositories,
 ) -> Result<BindingUseCase, Box<dyn std::error::Error>> {
-    let inventory: Arc<dyn InventoryPort> =
-        Arc::new(InventoryPortBridge::new(repos.inventory.clone()));
-    let resolve = ResolveUseCase::new(inventory);
+    let resolve = ResolveUseCase::new(inventory_port(config));
     let source: Arc<dyn cubtera_source::SourceRepo> = Arc::new(FsSource::new(&config.units_path));
     let store: Arc<dyn cubtera_store::Store> = Arc::new(SqliteStore::open(&config.store_path)?);
     let leaf_dim_type = config
@@ -138,23 +147,20 @@ pub async fn prepare(
     dimensions: &[String],
     extensions: &[String],
 ) -> Result<PreparedRun, Box<dyn std::error::Error>> {
-    let repos = Repositories::from_config(config).await?;
-    let hierarchy = Repositories::hierarchy(config);
-    let dimensions_service = Arc::new(DimensionService::new(repos.inventory.clone(), hierarchy));
-    let unit_service = UnitService::new(repos.units.clone(), dimensions_service);
+    let assemble = AssembleUseCase::new(inventory_port(config), unit_port(config));
 
-    let mut unit = unit_service
+    let mut unit = assemble
         .build_unit_with_extensions(org, unit_name, dimensions, extensions)
         .await?;
     let temp_folder = unit.calculate_temp_folder(&config.temp_folder_path);
     unit = unit.with_temp_folder(temp_folder);
 
     let plan = unit.materialize(&config.modules_path, None)?;
-    FsWorkspace::new().apply(&plan).await?;
+    cubtera_exec::apply_materialization_plan(&plan).await?;
 
-    let mut dim_refs = Vec::new();
+    let mut dim_refs: Vec<DimRef> = Vec::new();
     for dim in &unit.dimensions {
-        dim_refs.push(cubtera_kernel::DimRef::parse(&dim.key())?);
+        dim_refs.push(dim.clone());
     }
     let mut ext_refs = Vec::new();
     for ext in extensions {
@@ -167,7 +173,7 @@ pub async fn prepare(
         ext_refs,
     )?;
 
-    let use_case = build_use_case(config, &repos, unit.temp_folder.clone())?;
+    let use_case = build_use_case(config, unit.temp_folder.clone())?;
 
     Ok(PreparedRun {
         unit,

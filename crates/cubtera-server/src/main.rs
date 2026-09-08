@@ -3,7 +3,6 @@
 //! crate's `Cargo.toml` description and `docs/specs/2026-09-03-cubtera-v3-architecture.md`
 //! section 8 (P7).
 
-mod app_bridge;
 mod auth;
 mod error;
 mod exec_bridge;

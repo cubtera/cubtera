@@ -2,7 +2,6 @@
 //!
 //! Multi-dimensional Infrastructure Manager
 
-mod app_bridge;
 mod commands;
 mod error;
 mod exec_bridge;

@@ -2,15 +2,14 @@
 //! `crates/cubtera/src/commands/validate.rs`'s doc comment for what's
 //! checked: JSON schema + dim-graph edges per dimension).
 
-use crate::app_bridge::InventoryPortBridge;
 use crate::error::ApiError;
+use crate::run_support::inventory_port;
 use crate::server::AppState;
 use axum::extract::{Path, State};
 use axum::Json;
-use cubtera_app::{load_dim_graph, InventoryPort, ResolveUseCase, ValidateUseCase};
+use cubtera_app::{load_dim_graph, ResolveUseCase, ValidateUseCase};
 use cubtera_kernel::Ident;
 use cubtera_model::ModelError;
-use cubtera_persistence::Repositories;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -18,11 +17,7 @@ pub async fn validate(
     State(state): State<Arc<AppState>>,
     Path(org): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let repos = Repositories::from_config(&state.config)
-        .await
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let inventory: Arc<dyn InventoryPort> =
-        Arc::new(InventoryPortBridge::new(repos.inventory.clone()));
+    let inventory = inventory_port(&state.config);
 
     let chain: Vec<Ident> = state
         .config

@@ -15,7 +15,6 @@ use cubtera_app::ApplyRequest;
 use cubtera_config::Config;
 use cubtera_kernel::Ident;
 use cubtera_model::{PlanId, RunStatus};
-use cubtera_persistence::Repositories;
 use std::time::Duration;
 
 #[derive(Args)]
@@ -88,8 +87,7 @@ pub async fn run(
                 args.outputs_schema_version
             )
         })?;
-    let repos = Repositories::from_config(config).await?;
-    let inputs = build_input_requests(config, &repos, &prepared.unit).await?;
+    let inputs = build_input_requests(config, &prepared.unit).await?;
 
     let run = prepared
         .use_case
