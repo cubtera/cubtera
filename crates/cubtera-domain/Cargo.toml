@@ -14,4 +14,9 @@ toml.workspace = true
 sha2.workspace = true
 handlebars.workspace = true
 jsonschema.workspace = true
+# v3 seam (docs/specs/2026-09-03-cubtera-v3-architecture.md): validated
+# identity types at every path-constructing boundary (temp folder,
+# unit-state key, spec.files destinations). Zero I/O, zero async, so it
+# doesn't violate this crate's own dependency rule.
+cubtera-kernel.workspace = true
 

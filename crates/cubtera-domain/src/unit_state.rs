@@ -63,6 +63,59 @@ impl UnitStateKey {
         }
         s
     }
+
+    /// Validating constructor for untrusted input - CLI args (`cubtera
+    /// state get/rm`), REST query params (`GET .../units/{name}/state`),
+    /// and MCP tool params (`get_unit_state`) all build a `UnitStateKey`
+    /// directly from a caller-supplied string with no other validation in
+    /// front of it (unlike `cubtera run`, there is no `UnitService`/access
+    /// policy in this path). `FsUnitStateRepository::record_path` then
+    /// joins `org`/`unit`/every `dims`/`ext` entry straight onto
+    /// `unitStatePath` - so an unvalidated `org = "../../etc"` or
+    /// `dims = ["../../../tmp/pwned"]` was a direct arbitrary
+    /// read/write/delete via three different interfaces at once. This is
+    /// the v3 seam fix (docs/specs/2026-09-03-cubtera-v3-architecture.md
+    /// ยง4): validate through `cubtera_kernel::{Ident, DimRef}` once, here,
+    /// rather than trusting every interface to remember to check.
+    ///
+    /// [`UnitStateKey::new`] remains available, unvalidated, for internal
+    /// callers that already hold trusted data (e.g.
+    /// `UnitStateRecord::key()`, built from a `Unit` that was itself
+    /// constructed through `UnitService`, which validates independently).
+    pub fn try_new(
+        org: impl AsRef<str>,
+        unit: impl AsRef<str>,
+        dims: Vec<String>,
+        ext: Vec<String>,
+    ) -> DomainResult<Self> {
+        let org = validate_ident("org", org.as_ref())?;
+        let unit = validate_ident("unit", unit.as_ref())?;
+        let dims = dims
+            .iter()
+            .map(|d| validate_dim_ref("dims", d))
+            .collect::<DomainResult<Vec<_>>>()?;
+        let ext = ext
+            .iter()
+            .map(|e| validate_dim_ref("ext", e))
+            .collect::<DomainResult<Vec<_>>>()?;
+        Ok(Self::new(org, unit, dims, ext))
+    }
+}
+
+fn validate_ident(field: &'static str, raw: &str) -> DomainResult<String> {
+    cubtera_kernel::Ident::parse(raw)
+        .map(cubtera_kernel::Ident::into_string)
+        .map_err(|e| DomainError::InvalidManifest {
+            reason: format!("invalid {field} {raw:?}: {e}"),
+        })
+}
+
+fn validate_dim_ref(field: &'static str, raw: &str) -> DomainResult<String> {
+    cubtera_kernel::DimRef::parse(raw)
+        .map(|r| r.key())
+        .map_err(|e| DomainError::InvalidManifest {
+            reason: format!("invalid {field} entry {raw:?}: {e}"),
+        })
 }
 
 /// A producer's published outputs, as stored by a `UnitStateRepository`
@@ -171,6 +224,43 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn try_new_accepts_valid_input() {
+        let key = UnitStateKey::try_new("cubtera", "network", s(&["dome:prod"]), vec![]).unwrap();
+        assert_eq!(key.canonical(), "cubtera/network@dome:prod");
+    }
+
+    #[test]
+    fn try_new_rejects_path_traversal_in_org() {
+        assert!(UnitStateKey::try_new("../../etc", "network", vec![], vec![]).is_err());
+    }
+
+    #[test]
+    fn try_new_rejects_path_traversal_in_unit() {
+        assert!(UnitStateKey::try_new("cubtera", "../../etc", vec![], vec![]).is_err());
+    }
+
+    #[test]
+    fn try_new_rejects_path_traversal_in_dims() {
+        assert!(
+            UnitStateKey::try_new("cubtera", "network", s(&["../../../tmp/pwned:x"]), vec![])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn try_new_rejects_path_traversal_in_ext() {
+        assert!(
+            UnitStateKey::try_new("cubtera", "network", vec![], s(&["../../../tmp/pwned:x"]))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn try_new_rejects_dim_without_colon() {
+        assert!(UnitStateKey::try_new("cubtera", "network", s(&["no-colon"]), vec![]).is_err());
     }
 
     #[test]

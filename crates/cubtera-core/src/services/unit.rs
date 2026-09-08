@@ -61,6 +61,25 @@ impl UnitService {
         dimension_keys: &[String],
         extensions: &[String],
     ) -> AppResult<Unit> {
+        // v3 seam (docs/specs/2026-09-03-cubtera-v3-architecture.md ยง4):
+        // `org`/`unit_name` end up in `Unit::calculate_temp_folder`'s
+        // `base_path.join(org).join(name)` completely unvalidated, and
+        // `extensions` used to skip `DimensionRef` parsing entirely and go
+        // straight into `Unit.extensions`, which the same temp-folder
+        // builder joins onto the path one entry at a time. Validate all
+        // three up front - once, here, since every entry point (CLI `run`,
+        // future API/server run endpoints) goes through this method - so a
+        // crafted `-e '../../../etc'` or `-u '../../etc'` is a validation
+        // error, not a write outside `tempFolderPath`.
+        cubtera_kernel::Ident::parse(org)
+            .map_err(|e| AppError::validation(format!("invalid org {org:?}: {e}")))?;
+        cubtera_kernel::Ident::parse(unit_name)
+            .map_err(|e| AppError::validation(format!("invalid unit name {unit_name:?}: {e}")))?;
+        for ext in extensions {
+            cubtera_kernel::DimRef::parse(ext)
+                .map_err(|e| AppError::validation(format!("invalid extension {ext:?}: {e}")))?;
+        }
+
         // Load manifest
         let manifest = self
             .unit_repository

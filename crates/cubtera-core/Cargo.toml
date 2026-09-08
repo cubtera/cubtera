@@ -7,6 +7,7 @@ description = "Cubtera application layer - services and ports"
 
 [dependencies]
 cubtera-domain.workspace = true
+cubtera-kernel.workspace = true
 
 thiserror.workspace = true
 async-trait.workspace = true

@@ -3,6 +3,7 @@
 //! A Unit represents an atomic infrastructure operation.
 
 use crate::dimension::{DimType, Dimension, IncludeEntry};
+use crate::error::{DomainError, DomainResult};
 use crate::manifest::Manifest;
 use crate::materialization::{MaterializationPlan, MaterializationStep};
 use serde_json::{json, Value};
@@ -65,14 +66,22 @@ impl DimensionRef {
         }
     }
 
-    /// Parse from string (format: "type:name")
+    /// Parse from string (format: "type:name").
+    ///
+    /// Validated through `cubtera_kernel::DimRef` (v3 seam, see
+    /// docs/specs/2026-09-03-cubtera-v3-architecture.md ยง4): rejects `..`,
+    /// absolute paths, embedded `/`/`\0`, and anything else that isn't a
+    /// safe single filesystem path component in either half - this string
+    /// ends up in `Unit::calculate_temp_folder`'s `path.join(...)` and in
+    /// `UnitStateKey`'s on-disk layout, so a previously-accepted value like
+    /// `"../../etc:passwd"` (only two non-empty halves were required
+    /// before) is exactly the shape of the v2 path-escape bug this closes.
     pub fn parse(s: &str) -> Option<Self> {
-        let parts: Vec<&str> = s.splitn(2, ':').collect();
-        if parts.len() == 2 {
-            Some(Self::new(parts[0], parts[1]))
-        } else {
-            None
-        }
+        let dim_ref = cubtera_kernel::DimRef::parse(s).ok()?;
+        Some(Self::new(
+            dim_ref.dim_type.into_string(),
+            dim_ref.name.into_string(),
+        ))
     }
 
     /// Get the key representation (type:name)
@@ -238,11 +247,19 @@ impl Unit {
     /// null placeholders for declared-but-unprovided `optDims`, matching
     /// v1), dimension includes, `cubtera_ext.json` for extensions, and
     /// `spec.files`. Pure - no I/O, fully testable and `--dry-run`-printable.
+    ///
+    /// Fallible since v3's kernel seam (docs/specs/2026-09-03-cubtera-v3-architecture.md
+    /// ยง4): every `spec.files` destination is validated through
+    /// `cubtera_kernel::SafeSegment::split_relative_path` and joined from
+    /// the validated segments, not the raw manifest string, rejecting a
+    /// `dst = "../../../etc/cron.d/x"` at plan-build time (before any
+    /// `Workspace` ever touches disk) instead of silently writing outside
+    /// `temp_folder`.
     pub fn materialize(
         &self,
         modules_path: &Path,
         generic_unit_path: Option<&Path>,
-    ) -> MaterializationPlan {
+    ) -> DomainResult<MaterializationPlan> {
         let mut plan = MaterializationPlan::new(self.temp_folder.clone());
 
         plan.push(MaterializationStep::Symlink {
@@ -328,14 +345,14 @@ impl Unit {
             for (src, dst) in files.required.iter().flatten() {
                 plan.push(MaterializationStep::CopyFile {
                     src: PathBuf::from(src),
-                    dst: self.temp_folder.join(dst),
+                    dst: safe_join(&self.temp_folder, dst)?,
                     required: true,
                 });
             }
             for (src, dst) in files.optional.iter().flatten() {
                 plan.push(MaterializationStep::CopyFile {
                     src: PathBuf::from(src),
-                    dst: self.temp_folder.join(dst),
+                    dst: safe_join(&self.temp_folder, dst)?,
                     required: false,
                 });
             }
@@ -365,8 +382,25 @@ impl Unit {
             });
         }
 
-        plan
+        Ok(plan)
     }
+}
+
+/// Join `dst` (a `spec.files` destination from the manifest) onto
+/// `temp_folder`, rejecting anything that isn't a plain relative path -
+/// no `..`, no absolute path, no embedded NUL. See
+/// [`Unit::materialize`]'s doc comment for why this exists.
+fn safe_join(temp_folder: &Path, dst: &str) -> DomainResult<PathBuf> {
+    let segments = cubtera_kernel::SafeSegment::split_relative_path(dst).map_err(|e| {
+        DomainError::InvalidManifest {
+            reason: format!("invalid spec.files destination {dst:?}: {e}"),
+        }
+    })?;
+    let mut path = temp_folder.to_path_buf();
+    for segment in segments {
+        path.push(segment.as_str());
+    }
+    Ok(path)
 }
 
 /// Build the `cubtera_dim_{type}.json` content for a resolved dimension:
@@ -519,7 +553,7 @@ mod tests {
     #[test]
     fn materialize_symlinks_modules_and_copies_unit_files() {
         let unit = base_unit();
-        let plan = unit.materialize(Path::new("/modules"), None);
+        let plan = unit.materialize(Path::new("/modules"), None).unwrap();
 
         assert_eq!(plan.temp_folder, PathBuf::from("/tmp/cubtera/network"));
         assert!(plan.steps.iter().any(|s| matches!(
@@ -542,7 +576,9 @@ mod tests {
             .with_unit_path("/units/network")
             .with_temp_folder("/tmp/cubtera/network");
 
-        let plan = unit.materialize(Path::new("/modules"), Some(Path::new("/units/_generic")));
+        let plan = unit
+            .materialize(Path::new("/modules"), Some(Path::new("/units/_generic")))
+            .unwrap();
 
         let generic_copy_index = plan.steps.iter().position(|s| {
             matches!(
@@ -575,7 +611,7 @@ mod tests {
                 }),
             );
 
-        let plan = unit.materialize(Path::new("/modules"), None);
+        let plan = unit.materialize(Path::new("/modules"), None).unwrap();
 
         let content = plan
             .steps
@@ -606,7 +642,7 @@ mod tests {
             .with_unit_path("/units/network")
             .with_temp_folder("/tmp/cubtera/network");
 
-        let plan = unit.materialize(Path::new("/modules"), None);
+        let plan = unit.materialize(Path::new("/modules"), None).unwrap();
 
         let content = plan
             .steps
@@ -633,7 +669,7 @@ mod tests {
             .with_temp_folder("/tmp/cubtera/network")
             .with_dimension(DimensionRef::new("dome", "prod"));
 
-        let plan = unit.materialize(Path::new("/modules"), None);
+        let plan = unit.materialize(Path::new("/modules"), None).unwrap();
 
         let dome_writes = plan
             .steps
@@ -667,7 +703,7 @@ mod tests {
             },
         ]);
 
-        let plan = unit.materialize(Path::new("/modules"), None);
+        let plan = unit.materialize(Path::new("/modules"), None).unwrap();
 
         assert!(plan.steps.iter().any(|s| matches!(
             s,
@@ -686,7 +722,9 @@ mod tests {
     #[test]
     fn materialize_writes_ext_json_only_when_extensions_present() {
         let without_ext = base_unit();
-        let plan = without_ext.materialize(Path::new("/modules"), None);
+        let plan = without_ext
+            .materialize(Path::new("/modules"), None)
+            .unwrap();
         assert!(!plan.steps.iter().any(|s| matches!(
             s,
             MaterializationStep::WriteFile { path, .. }
@@ -694,7 +732,7 @@ mod tests {
         )));
 
         let with_ext = base_unit().with_extensions(vec!["index:0".to_string()]);
-        let plan = with_ext.materialize(Path::new("/modules"), None);
+        let plan = with_ext.materialize(Path::new("/modules"), None).unwrap();
         let content = plan
             .steps
             .iter()
@@ -731,7 +769,7 @@ mod tests {
             .with_unit_path("/units/network")
             .with_temp_folder("/tmp/cubtera/network");
 
-        let plan = unit.materialize(Path::new("/modules"), None);
+        let plan = unit.materialize(Path::new("/modules"), None).unwrap();
 
         assert!(plan.steps.iter().any(|s| matches!(
             s,
@@ -747,7 +785,9 @@ mod tests {
 
     #[test]
     fn materialize_skips_input_files_when_no_resolved_inputs() {
-        let plan = base_unit().materialize(Path::new("/modules"), None);
+        let plan = base_unit()
+            .materialize(Path::new("/modules"), None)
+            .unwrap();
         assert!(!plan.steps.iter().any(|s| matches!(
             s,
             MaterializationStep::WriteFile { path, .. }
@@ -762,7 +802,7 @@ mod tests {
         resolved_inputs.insert("certs".to_string(), json!({"cert_arn": "arn:aws:acm:..."}));
         let unit = base_unit().with_resolved_inputs(resolved_inputs);
 
-        let plan = unit.materialize(Path::new("/modules"), None);
+        let plan = unit.materialize(Path::new("/modules"), None).unwrap();
 
         let network_content = plan
             .steps

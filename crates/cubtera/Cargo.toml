@@ -10,6 +10,7 @@ name = "cubtera"
 path = "src/main.rs"
 
 [dependencies]
+cubtera-kernel.workspace = true
 cubtera-domain.workspace = true
 cubtera-core.workspace = true
 cubtera-config.workspace = true

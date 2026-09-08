@@ -12,15 +12,15 @@
 //! (including `cubtera-domain`'s eventual replacement, `cubtera-model`)
 //! depends on.
 
-mod dim_ref;
 mod digest;
+mod dim_ref;
 mod error;
 mod ident;
 mod instance_id;
 mod safe_segment;
 
-pub use dim_ref::DimRef;
 pub use digest::Digest;
+pub use dim_ref::DimRef;
 pub use error::KernelError;
 pub use ident::Ident;
 pub use instance_id::InstanceId;

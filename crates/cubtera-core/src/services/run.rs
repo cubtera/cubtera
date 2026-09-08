@@ -194,7 +194,7 @@ impl RunService {
         };
 
         if apply_plan {
-            let mut plan = unit.materialize(&self.copy_config.modules_path, None);
+            let mut plan = unit.materialize(&self.copy_config.modules_path, None)?;
             strategy.extend_plan(unit, params, &mut plan);
             self.workspace.apply(&plan).await?;
         }

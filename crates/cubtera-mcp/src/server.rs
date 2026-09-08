@@ -279,7 +279,9 @@ impl CubteraMcp {
         &self,
         Parameters(params): Parameters<UnitStateParams>,
     ) -> Result<CallToolResult, McpError> {
-        let key = UnitStateKey::new(params.org, params.unit_name, params.dims, params.ext);
+        let key = UnitStateKey::try_new(&params.org, &params.unit_name, params.dims, params.ext)
+            .map_err(cubtera_core::error::AppError::from)
+            .map_err(to_mcp_error)?;
         let record = self.unit_state.get(&key).await.map_err(to_mcp_error)?;
         json_result(serde_json::json!(record))
     }

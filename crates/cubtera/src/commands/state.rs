@@ -71,7 +71,7 @@ pub async fn run(
             dimensions,
             extensions,
         } => {
-            let key = UnitStateKey::new(config.org.clone(), unit.clone(), dimensions, extensions);
+            let key = UnitStateKey::try_new(&config.org, &unit, dimensions, extensions)?;
             let record = repos
                 .unit_state
                 .get(&key)
@@ -93,6 +93,11 @@ pub async fn run(
         }
 
         StateCommands::Ls { unit } => {
+            // `list` joins `org`/`unit` straight onto `unitStatePath` with
+            // no further checks (`FsUnitStateRepository::list`) - validate
+            // here, same as `Get`/`Rm`'s `UnitStateKey::try_new`.
+            cubtera_kernel::Ident::parse(&config.org)?;
+            cubtera_kernel::Ident::parse(&unit)?;
             let records = repos.unit_state.list(&config.org, &unit).await?;
 
             if ctx.json {
@@ -122,7 +127,7 @@ pub async fn run(
             dimensions,
             extensions,
         } => {
-            let key = UnitStateKey::new(config.org.clone(), unit, dimensions, extensions);
+            let key = UnitStateKey::try_new(&config.org, &unit, dimensions, extensions)?;
             repos.unit_state.delete(&key).await?;
 
             if ctx.json {

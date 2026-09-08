@@ -105,7 +105,10 @@ mod tests {
     fn of_parts_is_not_naive_concatenation() {
         let a = Digest::of_parts(["ab", "c"]);
         let b = Digest::of_parts(["a", "bc"]);
-        assert_ne!(a, b, "length-prefixing must prevent field-boundary collisions");
+        assert_ne!(
+            a, b,
+            "length-prefixing must prevent field-boundary collisions"
+        );
     }
 
     #[test]

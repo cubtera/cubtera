@@ -90,7 +90,7 @@ pub async fn run(config: &Config, args: RunArgs) -> Result<(), Box<dyn std::erro
             println!("{}", serde_json::to_string_pretty(&unit.resolved_inputs)?);
             println!();
         }
-        let plan = unit.materialize(&copy_config.modules_path, None);
+        let plan = unit.materialize(&copy_config.modules_path, None)?;
         println!("{plan}");
         return Ok(());
     }

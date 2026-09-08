@@ -1,5 +1,5 @@
-use crate::dim_ref::DimRef;
 use crate::digest::Digest;
+use crate::dim_ref::DimRef;
 use crate::error::KernelError;
 use crate::ident::Ident;
 use crate::safe_segment::SafeSegment;
@@ -139,7 +139,8 @@ impl InstanceId {
     /// "escapes the workspace root" be a type error, not a runtime check
     /// the caller has to remember to make.
     pub fn path_segments(&self) -> Vec<SafeSegment> {
-        let seg = |s: &str| SafeSegment::parse(s).expect("Ident/marker is always a valid SafeSegment");
+        let seg =
+            |s: &str| SafeSegment::parse(s).expect("Ident/marker is always a valid SafeSegment");
         let mut segments = vec![seg(self.org.as_str()), seg(self.unit.as_str())];
         segments.extend(self.dims.iter().map(|d| seg(&d.key())));
         if !self.ext.is_empty() {
@@ -248,7 +249,10 @@ mod tests {
         let err = InstanceId::try_new(
             Ident::parse("cubtera").unwrap(),
             Ident::parse("network").unwrap(),
-            [DimRef::parse("dome:prod").unwrap(), DimRef::parse("dome:stg").unwrap()],
+            [
+                DimRef::parse("dome:prod").unwrap(),
+                DimRef::parse("dome:stg").unwrap(),
+            ],
             [],
         )
         .unwrap_err();
@@ -269,7 +273,14 @@ mod tests {
         let segments: Vec<String> = inst.path_segments().iter().map(|s| s.to_string()).collect();
         assert_eq!(
             segments,
-            vec!["cubtera", "network", "dome:prod", "env:stg", ".ext", "index:0"]
+            vec![
+                "cubtera",
+                "network",
+                "dome:prod",
+                "env:stg",
+                ".ext",
+                "index:0"
+            ]
         );
         assert_eq!(segments.join("/"), inst.canonical());
     }

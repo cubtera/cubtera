@@ -38,7 +38,13 @@ pub async fn get_unit_state(
     Path((org, name)): Path<(String, String)>,
     Query(params): Query<UnitStateQuery>,
 ) -> Result<Json<UnitStateRecord>, ApiError> {
-    let key = UnitStateKey::new(org, name, split_csv(&params.dims), split_csv(&params.ext));
+    // `org`/`name` come straight from the URL path, `dims`/`ext` from the
+    // query string - `UnitStateKey::try_new` is the v3 seam validation
+    // (docs/specs/2026-09-03-cubtera-v3-architecture.md ยง4) that rejects a
+    // request like `GET /v1/../../etc/units/x/state` before it ever
+    // reaches the filesystem adapter.
+    let key = UnitStateKey::try_new(&org, &name, split_csv(&params.dims), split_csv(&params.ext))
+        .map_err(AppError::from)?;
     let record = state
         .unit_state
         .get(&key)
