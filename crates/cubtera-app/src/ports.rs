@@ -2,7 +2,7 @@
 //! crate needs lives here as a trait; adapters live in leaf crates (a
 //! thin bridge onto the existing `cubtera-persistence` FS adapter for
 //! P3, a native SQLite/FS adapter of its own once v2's `cubtera-core` is
-//! retired - see docs/specs/2026-09-03-cubtera-v3-architecture.md ยง9).
+//! retired - see docs/specs/2026-09-03-cubtera-v3-architecture.md section 9).
 
 use crate::error::AppResult;
 use async_trait::async_trait;

@@ -1,8 +1,8 @@
 //! `cubtera validate` - static check of the fleet: every dimension of
-//! every configured type against its JSON schema (mandatory in v3, ยง5.1)
+//! every configured type against its JSON schema (mandatory in v3, section 5.1)
 //! and its dim-graph edge (v2 never checked either at more than one
 //! dimension at a time). First real command built on `cubtera-app` (P3);
-//! see docs/specs/2026-09-03-cubtera-v3-architecture.md ยง3/ยง10.
+//! see docs/specs/2026-09-03-cubtera-v3-architecture.md section 3/section 10.
 
 use super::Ctx;
 use crate::app_bridge::InventoryPortBridge;

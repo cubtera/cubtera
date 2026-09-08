@@ -15,7 +15,7 @@
 use crate::app_bridge::InventoryPortBridge;
 use crate::exec_bridge::ExecutorBridge;
 use cubtera_app::ports::{Executor, SystemClock};
-use cubtera_app::{InventoryPort, ResolveUseCase, RunUseCase};
+use cubtera_app::{BindingUseCase, InventoryPort, ResolveUseCase, RunUseCase};
 use cubtera_config::Config;
 use cubtera_core::ports::Workspace as _;
 use cubtera_core::services::{DimensionService, UnitService};
@@ -63,6 +63,34 @@ pub fn build_use_case(
     let clock = Arc::new(SystemClock);
 
     Ok(RunUseCase::new(resolve, source, store, executor, clock))
+}
+
+/// Wire a `BindingUseCase` against the real inventory/source/store
+/// adapters (P5, `cubtera fleet status`/`cubtera drift`) - no `Executor`
+/// needed, since expanding/diffing a `Binding` never runs anything.
+/// `leaf_dim_type` is the last entry of `config.dim_relations` (e.g. `dc`):
+/// a `Binding`'s selector is evaluated once per name of that type, walking
+/// each one's resolved ancestor chain, the same shape `prepare` builds an
+/// `InstanceId` from for an ad hoc `plan`/`apply`.
+pub fn build_binding_use_case(
+    config: &Config,
+    repos: &Repositories,
+) -> Result<BindingUseCase, Box<dyn std::error::Error>> {
+    let inventory: Arc<dyn InventoryPort> =
+        Arc::new(InventoryPortBridge::new(repos.inventory.clone()));
+    let resolve = ResolveUseCase::new(inventory);
+    let source: Arc<dyn cubtera_source::SourceRepo> = Arc::new(FsSource::new(&config.units_path));
+    let store: Arc<dyn cubtera_store::Store> = Arc::new(SqliteStore::open(&config.store_path)?);
+    let leaf_dim_type = config
+        .dim_relations
+        .last()
+        .ok_or("config.dim_relations is empty - cannot determine the leaf dimension type")?;
+    Ok(BindingUseCase::new(
+        resolve,
+        source,
+        store,
+        Ident::parse(leaf_dim_type)?,
+    ))
 }
 
 /// Resolve `unit_name`/`dimensions`/`extensions`, materialize the unit's

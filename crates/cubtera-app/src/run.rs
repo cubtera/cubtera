@@ -129,23 +129,7 @@ impl RunUseCase {
             Value::String(dim_tree_parts.join("/")),
         );
 
-        let unit_tree = self.source.list_files(instance.unit().as_str()).await?;
-        let (manifest_files, other_files): (Vec<_>, Vec<_>) = unit_tree
-            .files
-            .into_iter()
-            .partition(|(path, _)| path == "manifest.toml" || path == "unit.toml");
-        let manifest_bytes = manifest_files
-            .into_iter()
-            .next()
-            .map(|(_, content)| content)
-            .unwrap_or_default();
-        // No pinned-module resolution yet - wiring `[runner] modules` ->
-        // `SourceRepo::resolve_module` -> `PinnedModule` is a real gap
-        // (tracked, not hidden): every unit in `example/units` is
-        // self-contained, so `pinned_modules: vec![]` is honest for what
-        // this phase actually exercises, not a silent shortcut on a case
-        // that matters today.
-        let package = UnitPackage::compute(&manifest_bytes, &other_files, vec![]);
+        let package = compute_package(&self.source, instance.unit().as_str()).await?;
 
         let inventory_revision = self.source.revision().await?;
 
@@ -396,6 +380,34 @@ impl RunUseCase {
         runs.pop()
             .ok_or_else(|| AppError::not_found("run", run_id.as_str()))
     }
+}
+
+/// Hash a unit's current on-disk package (manifest + files, no pinned
+/// modules yet - see the caveat where this used to live inline in
+/// `build_resolution`). Shared with `bindings::BindingUseCase::status`
+/// (P5), which needs the exact same "what would `plan` hash *right now*"
+/// computation to tell drifted instances apart from up-to-date ones.
+pub(crate) async fn compute_package(
+    source: &Arc<dyn SourceRepo>,
+    unit: &str,
+) -> AppResult<UnitPackage> {
+    let unit_tree = source.list_files(unit).await?;
+    let (manifest_files, other_files): (Vec<_>, Vec<_>) = unit_tree
+        .files
+        .into_iter()
+        .partition(|(path, _)| path == "manifest.toml" || path == "unit.toml");
+    let manifest_bytes = manifest_files
+        .into_iter()
+        .next()
+        .map(|(_, content)| content)
+        .unwrap_or_default();
+    // No pinned-module resolution yet - wiring `[runner] modules` ->
+    // `SourceRepo::resolve_module` -> `PinnedModule` is a real gap
+    // (tracked, not hidden): every unit in `example/units` is
+    // self-contained, so `pinned_modules: vec![]` is honest for what this
+    // phase actually exercises, not a silent shortcut on a case that
+    // matters today.
+    Ok(UnitPackage::compute(&manifest_bytes, &other_files, vec![]))
 }
 
 fn run_op_for(command: &[String]) -> RunOp {

@@ -68,6 +68,10 @@ enum Commands {
     /// Explain a past `Run`/`Plan` (v3, P4)
     #[command(subcommand)]
     Explain(commands::explain::ExplainCommands),
+
+    /// Diff a `Binding` (unit + selector) against `Store`, reporting only
+    /// drift - package changes or orphaned instances (v3, P5)
+    Drift(commands::drift::DriftArgs),
 }
 
 #[tokio::main]
@@ -119,6 +123,7 @@ async fn main() {
         Commands::Plan(args) => commands::plan::run(&config, &ctx, args).await,
         Commands::Apply(args) => commands::apply::run(&config, &ctx, args).await,
         Commands::Explain(cmd) => commands::explain::run(&config, &ctx, cmd).await,
+        Commands::Drift(args) => commands::drift::run(&config, &ctx, args).await,
     };
 
     if let Err(e) = result {

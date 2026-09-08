@@ -20,6 +20,12 @@ pub const EXIT_ACCESS_DENIED: i32 = 3;
 pub const EXIT_NOT_FOUND: i32 = 4;
 pub const EXIT_VALIDATION: i32 = 5;
 pub const EXIT_CONFIG: i32 = 6;
+/// `cubtera drift` found at least one `PackageDrifted`/`Orphaned` instance.
+/// Not an error in the usual sense (the command itself ran fine), but a
+/// distinct, deliberately non-zero signal for CI-style drift checks,
+/// separate from every other code above so it can never be confused with
+/// an actual failure.
+pub const EXIT_DRIFT_DETECTED: i32 = 7;
 
 /// Map a top-level command error to a process exit code.
 pub fn exit_code_for(err: &(dyn std::error::Error + 'static)) -> i32 {
@@ -37,7 +43,7 @@ pub fn exit_code_for(err: &(dyn std::error::Error + 'static)) -> i32 {
 
 /// Same mapping as [`exit_code_for_app_error`], for the v3 `cubtera-app`
 /// use cases (`cubtera validate`/`fleet ls`, P3) - a separate error type
-/// (see docs/specs/2026-09-03-cubtera-v3-architecture.md ยง3: `cubtera-app`
+/// (see docs/specs/2026-09-03-cubtera-v3-architecture.md section 3: `cubtera-app`
 /// cannot depend on `cubtera-core`) with the same shape.
 fn exit_code_for_v3_app_error(err: &V3AppError) -> i32 {
     match err {

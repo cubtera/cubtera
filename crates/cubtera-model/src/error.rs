@@ -10,6 +10,11 @@ pub enum ModelError {
         dim_type: String,
         errors: Vec<String>,
     },
+    /// A `Binding.selector` expression (ยง5.4) failed to parse - malformed
+    /// syntax, not a runtime evaluation failure (evaluation against a
+    /// missing field is `false`, never an error - see
+    /// `Selector::evaluate`'s doc comment).
+    Selector(String),
 }
 
 impl fmt::Display for ModelError {
@@ -32,6 +37,7 @@ impl fmt::Display for ModelError {
                     errors.join("; ")
                 )
             }
+            Self::Selector(msg) => write!(f, "invalid selector: {msg}"),
         }
     }
 }

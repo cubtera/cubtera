@@ -12,6 +12,7 @@
 //!
 //! See docs/specs/2026-09-03-cubtera-v3-architecture.md ยง5.
 
+mod binding;
 mod dim_graph;
 mod dimension;
 mod error;
@@ -27,6 +28,7 @@ mod run;
 mod test_support;
 mod unit_package;
 
+pub use binding::{Binding, Literal, Path, Selector, SelectorContext};
 pub use dim_graph::{DimEdge, DimGraph, DimTypeDef, GraphError, SchemaSpec};
 pub use dimension::Dimension;
 pub use error::ModelError;

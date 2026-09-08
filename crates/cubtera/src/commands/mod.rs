@@ -2,6 +2,7 @@
 
 pub mod apply;
 pub mod config;
+pub mod drift;
 pub mod explain;
 pub mod fleet;
 pub mod im;

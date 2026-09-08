@@ -2,7 +2,7 @@
 //! `cubtera_app::InventoryPort`.
 //!
 //! `cubtera-app` cannot depend on `cubtera-core` (see the crate table in
-//! docs/specs/2026-09-03-cubtera-v3-architecture.md ยง3), so its `resolve`/
+//! docs/specs/2026-09-03-cubtera-v3-architecture.md section 3), so its `resolve`/
 //! `validate` use cases (P3) need their own thin adapter to reuse the
 //! existing `FsInventoryRepository` this CLI already constructs via
 //! `Repositories::from_config` - there is no reason to stand up a second,

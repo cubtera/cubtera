@@ -4,7 +4,7 @@
 //!
 //! This is deliberately a *bridge*, not the end state: v3's inventory
 //! format eventually declares the graph's edges itself (named, typed,
-//! possibly non-linear - ยง5.1), instead of inferring one "parent" edge
+//! possibly non-linear - section 5.1), instead of inferring one "parent" edge
 //! per type from a flat ordered list. Building it this way for P3 means
 //! every existing v2 inventory gets real graph validation (unknown
 //! target types, gap-fill cycles - both silently accepted in v2, see
@@ -21,7 +21,7 @@ use cubtera_model::{DimEdge, DimGraph, DimTypeDef, SchemaSpec};
 /// (root first, e.g. `["dome", "env", "dc"]`), wiring a gap-fill `parent`
 /// edge from each type to the one before it in the chain. A type without
 /// a declared `.schema` record gets [`SchemaSpec::Permissive`] rather than
-/// being rejected - schemas are conceptually mandatory in v3 (ยง5.1) but
+/// being rejected - schemas are conceptually mandatory in v3 (section 5.1) but
 /// migrating every existing inventory to declare one is out of scope for
 /// this phase.
 pub async fn load_dim_graph(

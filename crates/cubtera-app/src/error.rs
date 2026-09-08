@@ -2,7 +2,7 @@
 //!
 //! Distinct from `cubtera_core::error::AppError` (v2) - this crate cannot
 //! depend on `cubtera-core` (see the crate table in
-//! docs/specs/2026-09-03-cubtera-v3-architecture.md ยง3: `cubtera-app`
+//! docs/specs/2026-09-03-cubtera-v3-architecture.md section 3: `cubtera-app`
 //! depends on `model, kernel` only), so it defines its own boundary error
 //! type. `crates/cubtera/src/error.rs` maps both to CLI exit codes.
 
@@ -41,6 +41,12 @@ impl From<cubtera_store::StoreError> for AppError {
 impl From<cubtera_source::SourceError> for AppError {
     fn from(e: cubtera_source::SourceError) -> Self {
         AppError::Backend(e.to_string())
+    }
+}
+
+impl From<cubtera_kernel::KernelError> for AppError {
+    fn from(e: cubtera_kernel::KernelError) -> Self {
+        AppError::Validation(e.to_string())
     }
 }
 
