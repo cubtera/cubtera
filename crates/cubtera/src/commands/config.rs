@@ -18,11 +18,8 @@ pub fn run(config: &Config, ctx: &Ctx) -> Result<(), Box<dyn std::error::Error>>
     }
     println!("Log Level: {}", config.log_level);
     println!();
-    if let Some(db) = &config.mongodb_connection_string {
-        println!("Storage: MongoDB ({db})");
-    } else {
-        println!("Storage: FS ({:?})", config.inventory_path);
-    }
+    println!("Inventory: FS ({:?})", config.inventory_path);
+    println!("Store: SQLite ({:?})", config.store_path);
     println!();
     println!("Paths:");
     println!("  Units: {:?}", config.units_path);
@@ -38,13 +35,6 @@ pub fn run(config: &Config, ctx: &Ctx) -> Result<(), Box<dyn std::error::Error>>
             "State Backends: {:?}",
             config.state.keys().collect::<Vec<_>>()
         );
-    }
-
-    if let Some(dlog) = &config.deployment_log {
-        println!();
-        println!("Deployment Log:");
-        println!("  Database: {}", dlog.database);
-        println!("  Collection: {}", dlog.collection);
     }
 
     Ok(())

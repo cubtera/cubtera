@@ -1,21 +1,21 @@
 //! Runs the shared `UnitStateRepository` contract suite (see
-//! `tests/support_unit_state/mod.rs`) against `FsUnitStateRepository`.
+//! `tests/support_unit_state/mod.rs`) against `SqliteUnitStateRepository` -
+//! the backend that replaced `FsUnitStateRepository`/
+//! `MongoUnitStateRepository` in P2.
 
 #[path = "support_unit_state/mod.rs"]
 mod support_unit_state;
 
 use cubtera_core::ports::UnitStateRepository;
-use cubtera_persistence::fs::FsUnitStateRepository;
+use cubtera_persistence::sqlite::SqliteUnitStateRepository;
+use cubtera_store::SqliteStore;
 use std::sync::Arc;
 
-/// Each test gets its own empty temp directory (leaked so it outlives the
-/// test - same tradeoff `tests/deployment_log_contract_fs.rs` makes) so
-/// runs never see another test's `outputs.json` files.
+/// Each test gets its own fresh in-memory SQLite database - see
+/// `tests/deployment_log_contract_sqlite.rs` for the same reasoning.
 fn fresh_repo() -> Arc<dyn UnitStateRepository> {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = FsUnitStateRepository::new(dir.path().to_path_buf());
-    std::mem::forget(dir);
-    Arc::new(repo)
+    let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+    Arc::new(SqliteUnitStateRepository::new(store))
 }
 
 #[tokio::test]

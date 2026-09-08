@@ -13,9 +13,11 @@
 //! (adapters must not block the tokio reactor).
 
 mod error;
+mod legacy;
 mod port;
 mod sqlite;
 
 pub use error::{StoreError, StoreResult};
+pub use legacy::{LegacyDeploymentLogRow, LegacyUnitStateRow};
 pub use port::Store;
 pub use sqlite::SqliteStore;

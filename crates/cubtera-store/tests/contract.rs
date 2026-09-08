@@ -410,6 +410,92 @@ async fn artifacts_are_content_addressed_and_deduplicated() {
 }
 
 #[tokio::test]
+async fn legacy_deployment_log_is_append_only_and_scoped_by_org() {
+    use cubtera_store::LegacyDeploymentLogRow;
+    use std::collections::BTreeMap;
+
+    let store = cubtera_store::SqliteStore::open_in_memory().unwrap();
+    let row = |org: &str, ts: i64| LegacyDeploymentLogRow {
+        org: org.into(),
+        unit_name: "network".into(),
+        dimensions: vec!["dome:prod".into()],
+        command: "apply".into(),
+        exit_code: 0,
+        timestamp: ts,
+        duration_ms: 10,
+        git_shas: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    store
+        .append_legacy_deployment_log(row("cubtera", 1))
+        .await
+        .unwrap();
+    store
+        .append_legacy_deployment_log(row("cubtera", 2))
+        .await
+        .unwrap();
+    store
+        .append_legacy_deployment_log(row("other-org", 3))
+        .await
+        .unwrap();
+
+    let cubtera_rows = store.find_legacy_deployment_log("cubtera").await.unwrap();
+    assert_eq!(cubtera_rows.len(), 2);
+    let other_rows = store.find_legacy_deployment_log("other-org").await.unwrap();
+    assert_eq!(other_rows.len(), 1);
+}
+
+#[tokio::test]
+async fn legacy_unit_state_put_get_delete_list_round_trip() {
+    use cubtera_store::LegacyUnitStateRow;
+
+    let store = cubtera_store::SqliteStore::open_in_memory().unwrap();
+    let key = cubtera_store::LegacyUnitStateRow::state_key(
+        "cubtera",
+        "network",
+        &["dome:prod".to_string()],
+        &[],
+    );
+    let row = LegacyUnitStateRow {
+        org: "cubtera".into(),
+        unit: "network".into(),
+        dims: vec!["dome:prod".into()],
+        ext: vec![],
+        outputs: serde_json::json!({"vpc_id": "vpc-1"}),
+        updated_at: 1,
+    };
+
+    assert!(store.get_legacy_unit_state(&key).await.unwrap().is_none());
+
+    store
+        .put_legacy_unit_state(key.clone(), row.clone())
+        .await
+        .unwrap();
+    let fetched = store.get_legacy_unit_state(&key).await.unwrap().unwrap();
+    assert_eq!(fetched.outputs, serde_json::json!({"vpc_id": "vpc-1"}));
+
+    // put again overwrites, does not duplicate.
+    let mut updated = row.clone();
+    updated.outputs = serde_json::json!({"vpc_id": "vpc-2"});
+    store
+        .put_legacy_unit_state(key.clone(), updated)
+        .await
+        .unwrap();
+    let list = store
+        .list_legacy_unit_state("cubtera", "network")
+        .await
+        .unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].outputs, serde_json::json!({"vpc_id": "vpc-2"}));
+
+    store.delete_legacy_unit_state(&key).await.unwrap();
+    assert!(store.get_legacy_unit_state(&key).await.unwrap().is_none());
+    // Deleting again (already-missing) must not error.
+    store.delete_legacy_unit_state(&key).await.unwrap();
+}
+
+#[tokio::test]
 async fn store_survives_reopening_the_same_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cubtera.sqlite");

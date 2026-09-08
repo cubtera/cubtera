@@ -14,7 +14,7 @@ cubtera-kernel.workspace = true
 cubtera-domain.workspace = true
 cubtera-core.workspace = true
 cubtera-config.workspace = true
-cubtera-persistence = { workspace = true, features = ["mongodb"] }
+cubtera-persistence.workspace = true
 cubtera-runners.workspace = true
 
 clap.workspace = true
@@ -27,4 +27,5 @@ serde_json.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
+cubtera-store.workspace = true
 

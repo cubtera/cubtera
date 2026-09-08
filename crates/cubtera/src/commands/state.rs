@@ -93,9 +93,9 @@ pub async fn run(
         }
 
         StateCommands::Ls { unit } => {
-            // `list` joins `org`/`unit` straight onto `unitStatePath` with
-            // no further checks (`FsUnitStateRepository::list`) - validate
-            // here, same as `Get`/`Rm`'s `UnitStateKey::try_new`.
+            // `list` uses `org`/`unit` as raw SQL query parameters with no
+            // further checks - validate here, same as `Get`/`Rm`'s
+            // `UnitStateKey::try_new`.
             cubtera_kernel::Ident::parse(&config.org)?;
             cubtera_kernel::Ident::parse(&unit)?;
             let records = repos.unit_state.list(&config.org, &unit).await?;

@@ -1,4 +1,5 @@
 use crate::error::{StoreError, StoreResult};
+use crate::legacy::{LegacyDeploymentLogRow, LegacyUnitStateRow};
 use crate::port::Store;
 use async_trait::async_trait;
 use cubtera_kernel::{Digest, Ident, InstanceId};
@@ -26,7 +27,16 @@ pub struct SqliteStore {
 }
 
 impl SqliteStore {
+    /// Open (creating if necessary) a SQLite database at `path`, creating
+    /// its parent directory too - callers hand this a config-derived path
+    /// like `~/.cubtera/store.sqlite`, which usually doesn't exist yet on
+    /// a fresh install.
     pub fn open(path: impl AsRef<Path>) -> StoreResult<Self> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| StoreError::Backend(format!("failed to create {parent:?}: {e}")))?;
+        }
         let conn = Connection::open(path)?;
         Self::from_connection(conn)
     }
@@ -37,6 +47,15 @@ impl SqliteStore {
     }
 
     fn from_connection(conn: Connection) -> StoreResult<Self> {
+        // `cubtera` is a short-lived CLI process invoked repeatedly against
+        // the *same* on-disk database file (`~/.cubtera/store.sqlite` by
+        // default) - unlike the in-process `Arc<Mutex<Connection>>` here,
+        // there is no coordination between separate `cubtera` processes.
+        // WAL lets readers and a writer proceed concurrently, and
+        // `busy_timeout` makes a genuine writer/writer conflict retry for
+        // a bit instead of immediately failing with `SQLITE_BUSY`.
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.busy_timeout(Duration::from_secs(5))?;
         super::schema::apply(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -522,6 +541,126 @@ impl Store for SqliteStore {
                 )
                 .optional()?;
             Ok(bytes)
+        })
+        .await
+    }
+}
+
+/// Migration seam for v2's `DeploymentLogRepository`/`UnitStateRepository`
+/// ports - see [`crate::legacy`]. Not part of the [`Store`] trait: these
+/// shapes are v2-only and retired in P7, so they stay as plain inherent
+/// methods rather than polluting the v3 port every future adapter has to
+/// implement.
+impl SqliteStore {
+    /// Append one deployment-log entry. Append-only, like the v2 fs-jsonl
+    /// adapter it replaces - there is no update/delete for log entries.
+    pub async fn append_legacy_deployment_log(
+        &self,
+        row: LegacyDeploymentLogRow,
+    ) -> StoreResult<()> {
+        self.with_conn(move |conn| {
+            let data = serde_json::to_string(&row)?;
+            conn.execute(
+                "INSERT INTO legacy_deployment_log (org, timestamp, data) VALUES (?1, ?2, ?3)",
+                params![row.org, row.timestamp, data],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Every entry ever saved for `org`, in no particular order - callers
+    /// apply their own query-matching and newest-first/limit logic on top
+    /// (see `cubtera-persistence`'s adapter), matching the v2 fs-jsonl
+    /// adapter's own "read everything, then filter in process" shape so
+    /// the two can't drift on what a query actually matches.
+    pub async fn find_legacy_deployment_log(
+        &self,
+        org: &str,
+    ) -> StoreResult<Vec<LegacyDeploymentLogRow>> {
+        let org = org.to_string();
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare("SELECT data FROM legacy_deployment_log WHERE org = ?1")?;
+            let rows = stmt.query_map(params![org], |row| row.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    pub async fn get_legacy_unit_state(
+        &self,
+        state_key: &str,
+    ) -> StoreResult<Option<LegacyUnitStateRow>> {
+        let state_key = state_key.to_string();
+        self.with_conn(move |conn| {
+            let data: Option<String> = conn
+                .query_row(
+                    "SELECT data FROM legacy_unit_state WHERE state_key = ?1",
+                    params![state_key],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            data.map(|d| serde_json::from_str(&d).map_err(StoreError::from))
+                .transpose()
+        })
+        .await
+    }
+
+    /// Publish (or overwrite) a unit-state row under `state_key` - matches
+    /// v2's "put overwrites, never appends" semantics.
+    pub async fn put_legacy_unit_state(
+        &self,
+        state_key: String,
+        row: LegacyUnitStateRow,
+    ) -> StoreResult<()> {
+        self.with_conn(move |conn| {
+            let data = serde_json::to_string(&row)?;
+            conn.execute(
+                "INSERT INTO legacy_unit_state (state_key, org, unit, data) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(state_key) DO UPDATE SET data = excluded.data",
+                params![state_key, row.org, row.unit, data],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Delete a unit-state row. A no-op (not an error) if it never existed
+    /// - matches v2's `UnitStateRepository::delete` contract.
+    pub async fn delete_legacy_unit_state(&self, state_key: &str) -> StoreResult<()> {
+        let state_key = state_key.to_string();
+        self.with_conn(move |conn| {
+            conn.execute(
+                "DELETE FROM legacy_unit_state WHERE state_key = ?1",
+                params![state_key],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Every unit-state row published for `org`/`unit`, across every
+    /// dims/ext combination it has ever published under.
+    pub async fn list_legacy_unit_state(
+        &self,
+        org: &str,
+        unit: &str,
+    ) -> StoreResult<Vec<LegacyUnitStateRow>> {
+        let org = org.to_string();
+        let unit = unit.to_string();
+        self.with_conn(move |conn| {
+            let mut stmt =
+                conn.prepare("SELECT data FROM legacy_unit_state WHERE org = ?1 AND unit = ?2")?;
+            let rows = stmt.query_map(params![org, unit], |row| row.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+            Ok(out)
         })
         .await
     }

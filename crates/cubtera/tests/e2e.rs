@@ -28,8 +28,14 @@ fn cli() -> Command {
     // Leak: the dir only needs to outlive this one process invocation, and
     // the OS temp dir gets reaped independently of this test suite.
     let temp_path = temp_dir.into_path();
+    // Every command eagerly opens the SQLite store (`Repositories::from_config`),
+    // even `im get`/`config`, which never touch it - point it at an isolated
+    // per-test path so tests never collide on (or depend on the existence
+    // of) the real `~/.cubtera/store.sqlite`.
+    let store_path = temp_path.join("store.sqlite");
     cmd.current_dir(repo_root())
         .env("CUBTERA_TEMP_PATH", temp_path)
+        .env("CUBTERA_STORE_PATH", store_path)
         .args(["-c", "example/config.toml"]);
     cmd
 }

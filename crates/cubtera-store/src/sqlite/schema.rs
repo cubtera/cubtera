@@ -77,6 +77,23 @@ pub fn apply(conn: &Connection) -> rusqlite::Result<()> {
             digest TEXT PRIMARY KEY,
             bytes  BLOB NOT NULL
         );
+
+        -- Migration seam for v2's DeploymentLogRepository/UnitStateRepository
+        -- ports (see src/legacy.rs) - retired in P7 alongside those ports.
+        CREATE TABLE IF NOT EXISTS legacy_deployment_log (
+            org       TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            data      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_legacy_dlog_org ON legacy_deployment_log(org);
+
+        CREATE TABLE IF NOT EXISTS legacy_unit_state (
+            state_key TEXT PRIMARY KEY,
+            org       TEXT NOT NULL,
+            unit      TEXT NOT NULL,
+            data      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_legacy_unit_state_org_unit ON legacy_unit_state(org, unit);
         "#,
     )
 }

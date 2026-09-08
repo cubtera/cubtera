@@ -3,11 +3,8 @@
 use super::Ctx;
 use clap::Subcommand;
 use cubtera_config::Config;
-use cubtera_core::ports::InventoryRepository;
 use cubtera_core::services::{DimensionService, SchemaValidation};
 use cubtera_domain::Dimension;
-use cubtera_persistence::fs::FsInventoryRepository;
-use cubtera_persistence::mongodb::MongoInventoryRepository;
 use cubtera_persistence::Repositories;
 use serde_json::{json, Value};
 
@@ -64,26 +61,6 @@ pub enum ImCommands {
     /// Validate a dimension: exists, and (if the type has a `.schema:meta.json`)
     /// its "meta" section satisfies that schema
     Validate {
-        /// Dimension type
-        dim_type: String,
-        /// Dimension name
-        name: String,
-    },
-
-    /// Sync a dim_type's defaults from FS inventory to MongoDB (requires `CUBTERA_DB`)
-    SyncDefaults {
-        /// Dimension type
-        dim_type: String,
-    },
-
-    /// Sync every dimension of a dim_type from FS inventory to MongoDB (requires `CUBTERA_DB`)
-    SyncAll {
-        /// Dimension type
-        dim_type: String,
-    },
-
-    /// Sync a single dimension from FS inventory to MongoDB (requires `CUBTERA_DB`)
-    Sync {
         /// Dimension type
         dim_type: String,
         /// Dimension name
@@ -234,71 +211,9 @@ pub async fn run(
                 std::process::exit(crate::error::EXIT_VALIDATION);
             }
         }
-
-        ImCommands::SyncDefaults { dim_type } => {
-            let mongo = mongo_target(config).await?;
-            let fs = fs_source(config);
-            match fs.get_raw_defaults(&config.org, &dim_type).await? {
-                Some(raw) => {
-                    mongo.save_raw(&config.org, &dim_type, &raw).await?;
-                    println!("Synced defaults for '{dim_type}' to MongoDB");
-                }
-                None => println!("No defaults found for '{dim_type}', nothing to sync"),
-            }
-        }
-
-        ImCommands::SyncAll { dim_type } => {
-            let mongo = mongo_target(config).await?;
-            let fs = fs_source(config);
-            let names = fs.list_names(&config.org, &dim_type).await?;
-            let mut synced = 0;
-            for name in &names {
-                if let Some(raw) = fs.get_raw(&config.org, &dim_type, name).await? {
-                    mongo.save_raw(&config.org, &dim_type, &raw).await?;
-                    synced += 1;
-                }
-            }
-            println!("Synced {synced} '{dim_type}' dimension(s) to MongoDB");
-        }
-
-        ImCommands::Sync { dim_type, name } => {
-            let mongo = mongo_target(config).await?;
-            let fs = fs_source(config);
-            let raw = fs
-                .get_raw(&config.org, &dim_type, &name)
-                .await?
-                .ok_or_else(|| format!("{dim_type}:{name} does not exist in FS inventory"))?;
-            mongo.save_raw(&config.org, &dim_type, &raw).await?;
-            println!("Synced {dim_type}:{name} to MongoDB");
-        }
     }
 
     Ok(())
-}
-
-/// FS inventory repository built straight from `inventory_path`, bypassing
-/// [`Repositories::from_config`] (which picks *one* active backend for the
-/// rest of the CLI) - `im sync*` always reads from FS and writes to Mongo
-/// regardless of which backend `run`/`im get*` are currently pointed at.
-fn fs_source(config: &Config) -> FsInventoryRepository {
-    FsInventoryRepository::new(config.inventory_path.clone())
-        .with_separator(config.file_name_separator.clone())
-}
-
-/// MongoDB inventory repository to sync into. Requires `CUBTERA_DB` (surfaced
-/// as [`Config::mongodb_connection_string`]) - there's no `config.toml` field
-/// for it, matching v1's env-var-only switch.
-async fn mongo_target(
-    config: &Config,
-) -> Result<MongoInventoryRepository, Box<dyn std::error::Error>> {
-    let connection_string = config
-        .mongodb_connection_string
-        .as_ref()
-        .ok_or("CUBTERA_DB must be set to sync inventory to MongoDB")?;
-    Ok(
-        MongoInventoryRepository::new(connection_string, config.file_name_separator.clone())
-            .await?,
-    )
 }
 
 fn print_list(ctx: &Ctx, items: &[String]) {

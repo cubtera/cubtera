@@ -1,14 +1,16 @@
-//! `cubtera state get/ls/rm` against a fs-json `UnitStateRepository` seeded
-//! directly (bypassing an actual `run` + `[outputs] publish = true`, which
-//! would need real terraform/tofu credentials) - these commands are pure
-//! reads/writes against whatever a producer already published, so seeding
-//! the store directly is a faithful test of the CLI plumbing.
+//! `cubtera state get/ls/rm` against a SQLite-backed `UnitStateRepository`
+//! seeded directly (bypassing an actual `run` + `[outputs] publish = true`,
+//! which would need real terraform/tofu credentials) - these commands are
+//! pure reads/writes against whatever a producer already published, so
+//! seeding the store directly is a faithful test of the CLI plumbing.
 
 use assert_cmd::Command;
 use cubtera_core::ports::UnitStateRepository;
 use cubtera_domain::UnitStateRecord;
-use cubtera_persistence::fs::FsUnitStateRepository;
+use cubtera_persistence::sqlite::SqliteUnitStateRepository;
+use cubtera_store::SqliteStore;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -17,20 +19,24 @@ fn repo_root() -> PathBuf {
         .unwrap()
 }
 
-fn cli(state_path: &Path) -> Command {
+fn cli(store_path: &Path) -> Command {
     let mut cmd = Command::cargo_bin("cubtera").unwrap();
     cmd.current_dir(repo_root())
-        .env("CUBTERA_UNIT_STATE_PATH", state_path)
+        .env("CUBTERA_STORE_PATH", store_path)
         .args(["-c", "example/config.toml"]);
     cmd
 }
 
-fn fresh_state_dir() -> PathBuf {
-    tempfile::tempdir().unwrap().into_path()
+fn fresh_store_path() -> PathBuf {
+    tempfile::tempdir()
+        .unwrap()
+        .into_path()
+        .join("store.sqlite")
 }
 
-async fn seed(state_path: &Path, unit: &str, dims: &[&str], outputs: serde_json::Value) {
-    let repo = FsUnitStateRepository::new(state_path.to_path_buf());
+async fn seed(store_path: &Path, unit: &str, dims: &[&str], outputs: serde_json::Value) {
+    let store = Arc::new(SqliteStore::open(store_path).unwrap());
+    let repo = SqliteUnitStateRepository::new(store);
     let record = UnitStateRecord {
         org: "cubtera".to_string(),
         unit: unit.to_string(),
@@ -44,15 +50,15 @@ async fn seed(state_path: &Path, unit: &str, dims: &[&str], outputs: serde_json:
 
 #[test]
 fn state_get_prints_published_outputs_for_exact_key() {
-    let state_path = fresh_state_dir();
+    let store_path = fresh_store_path();
     tokio::runtime::Runtime::new().unwrap().block_on(seed(
-        &state_path,
+        &store_path,
         "network",
         &["dome:prod"],
         serde_json::json!({"vpc_id": "vpc-123"}),
     ));
 
-    cli(&state_path)
+    cli(&store_path)
         .args(["state", "get", "-u", "network", "-d", "dome:prod"])
         .assert()
         .success()
@@ -61,9 +67,9 @@ fn state_get_prints_published_outputs_for_exact_key() {
 
 #[test]
 fn state_get_missing_key_exits_not_found() {
-    let state_path = fresh_state_dir();
+    let store_path = fresh_store_path();
 
-    cli(&state_path)
+    cli(&store_path)
         .args(["state", "get", "-u", "network", "-d", "dome:prod"])
         .assert()
         .code(4);
@@ -71,15 +77,15 @@ fn state_get_missing_key_exits_not_found() {
 
 #[test]
 fn state_get_json_emits_full_record() {
-    let state_path = fresh_state_dir();
+    let store_path = fresh_store_path();
     tokio::runtime::Runtime::new().unwrap().block_on(seed(
-        &state_path,
+        &store_path,
         "network",
         &["dome:prod"],
         serde_json::json!({"vpc_id": "vpc-123"}),
     ));
 
-    let output = cli(&state_path)
+    let output = cli(&store_path)
         .args(["--json", "state", "get", "-u", "network", "-d", "dome:prod"])
         .assert()
         .success();
@@ -91,22 +97,22 @@ fn state_get_json_emits_full_record() {
 
 #[test]
 fn state_ls_lists_every_published_dims_combination() {
-    let state_path = fresh_state_dir();
+    let store_path = fresh_store_path();
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(seed(
-        &state_path,
+        &store_path,
         "network",
         &["dome:prod"],
         serde_json::json!({"a": 1}),
     ));
     rt.block_on(seed(
-        &state_path,
+        &store_path,
         "network",
         &["dome:staging"],
         serde_json::json!({"a": 2}),
     ));
 
-    cli(&state_path)
+    cli(&store_path)
         .args(["state", "ls", "-u", "network"])
         .assert()
         .success()
@@ -116,9 +122,9 @@ fn state_ls_lists_every_published_dims_combination() {
 
 #[test]
 fn state_ls_on_unpublished_unit_says_so() {
-    let state_path = fresh_state_dir();
+    let store_path = fresh_store_path();
 
-    cli(&state_path)
+    cli(&store_path)
         .args(["state", "ls", "-u", "network"])
         .assert()
         .success()
@@ -129,20 +135,20 @@ fn state_ls_on_unpublished_unit_says_so() {
 
 #[test]
 fn state_rm_deletes_the_record() {
-    let state_path = fresh_state_dir();
+    let store_path = fresh_store_path();
     tokio::runtime::Runtime::new().unwrap().block_on(seed(
-        &state_path,
+        &store_path,
         "network",
         &["dome:prod"],
         serde_json::json!({"vpc_id": "vpc-123"}),
     ));
 
-    cli(&state_path)
+    cli(&store_path)
         .args(["state", "rm", "-u", "network", "-d", "dome:prod"])
         .assert()
         .success();
 
-    cli(&state_path)
+    cli(&store_path)
         .args(["state", "get", "-u", "network", "-d", "dome:prod"])
         .assert()
         .code(4);

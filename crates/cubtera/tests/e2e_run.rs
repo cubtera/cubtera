@@ -13,12 +13,31 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
         .unwrap()
+}
+
+/// A single SQLite store shared by every `cubtera` invocation in this test
+/// binary - mirrors the real deployment shape (one `~/.cubtera/store.sqlite`
+/// shared across every separate `cubtera` process invocation) but isolated
+/// from the developer's actual home directory. Deliberately *not* scoped to
+/// a per-test `temp_path`: `tf_unit_applies_and_creates_local_files` below
+/// publishes `tf_unit02`'s outputs from one `cubtera run` and consumes them
+/// from `bash_unit01`'s `cubtera run` under a *different* temp folder - only
+/// the store needs to be shared across those two calls, not the workspace.
+fn shared_store_path() -> &'static Path {
+    static STORE_PATH: OnceLock<PathBuf> = OnceLock::new();
+    STORE_PATH.get_or_init(|| {
+        tempfile::tempdir()
+            .unwrap()
+            .into_path()
+            .join("store.sqlite")
+    })
 }
 
 /// A `cubtera` invocation rooted at the repo root, pointed at
@@ -30,6 +49,7 @@ fn cli(temp_path: &Path) -> Command {
     let mut cmd = Command::cargo_bin("cubtera").unwrap();
     cmd.current_dir(repo_root())
         .env("CUBTERA_TEMP_PATH", temp_path)
+        .env("CUBTERA_STORE_PATH", shared_store_path())
         .args(["-c", "example/config.toml"]);
     cmd
 }

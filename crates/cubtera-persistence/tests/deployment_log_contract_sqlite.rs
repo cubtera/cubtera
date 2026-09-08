@@ -1,21 +1,22 @@
 //! Runs the shared `DeploymentLogRepository` contract suite (see
-//! `tests/support_dlog/mod.rs`) against `FsDeploymentLogRepository`.
+//! `tests/support_dlog/mod.rs`) against `SqliteDeploymentLogRepository` -
+//! the backend that replaced `FsDeploymentLogRepository`/
+//! `MongoDeploymentLogRepository` in P2.
 
 #[path = "support_dlog/mod.rs"]
 mod support_dlog;
 
 use cubtera_core::ports::DeploymentLogRepository;
-use cubtera_persistence::fs::FsDeploymentLogRepository;
+use cubtera_persistence::sqlite::SqliteDeploymentLogRepository;
+use cubtera_store::SqliteStore;
 use std::sync::Arc;
 
-/// Each test gets its own empty temp directory (leaked so it outlives the
-/// test - same tradeoff `tests/inventory_contract_fs.rs` makes) so runs
-/// never see another test's `.jsonl` files.
+/// Each test gets its own fresh in-memory SQLite database, so runs never
+/// see another test's rows (unlike a shared on-disk store, an in-memory
+/// `SqliteStore` is naturally isolated per instance).
 fn fresh_repo() -> Arc<dyn DeploymentLogRepository> {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = FsDeploymentLogRepository::new(dir.path().to_path_buf());
-    std::mem::forget(dir);
-    Arc::new(repo)
+    let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+    Arc::new(SqliteDeploymentLogRepository::new(store))
 }
 
 #[tokio::test]

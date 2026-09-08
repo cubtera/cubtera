@@ -29,6 +29,7 @@ fn cli_with_temp() -> (Command, PathBuf) {
     let temp_path = temp_dir.into_path();
     cmd.current_dir(repo_root())
         .env("CUBTERA_TEMP_PATH", &temp_path)
+        .env("CUBTERA_STORE_PATH", temp_path.join("store.sqlite"))
         .args(["-c", "example/config.toml"]);
     (cmd, temp_path)
 }

@@ -129,13 +129,12 @@ struct PartialConfig {
     plugins_path: Option<PathBuf>,
     #[serde(alias = "temp_folder_path")]
     temp_folder_path: Option<PathBuf>,
-    /// FS-jsonl deployment log root, used when `deployment_log` (Mongo) is
-    /// unset.
-    #[serde(alias = "deployment_log_path")]
-    deployment_log_path: Option<PathBuf>,
-    /// FS-json unit state root, used when `unit_state` (Mongo) is unset.
-    #[serde(alias = "unit_state_path")]
-    unit_state_path: Option<PathBuf>,
+    /// SQLite `Store` file backing the deployment log and unit state
+    /// (cross-unit outputs) - see
+    /// docs/specs/2026-09-03-cubtera-v3-architecture.md ยง9. Replaces v2's
+    /// FS-jsonl/FS-json/Mongo three-way choice for these two concerns.
+    #[serde(alias = "store_path")]
+    store_path: Option<PathBuf>,
     #[serde(alias = "dim_relations")]
     dim_relations: Option<Vec<String>>,
     orgs: Option<Vec<String>>,
@@ -151,10 +150,6 @@ struct PartialConfig {
     runner: HashMap<String, HashMap<String, String>>,
     #[serde(default)]
     state: HashMap<String, StateBackendConfig>,
-    #[serde(alias = "deployment_log")]
-    deployment_log: Option<DeploymentLogConfig>,
-    #[serde(alias = "unit_state")]
-    unit_state: Option<UnitStateConfig>,
     #[serde(alias = "api_key")]
     api_key: Option<String>,
 }
@@ -182,14 +177,7 @@ impl PartialConfig {
                 .temp_folder_path
                 .clone()
                 .or_else(|| base.temp_folder_path.clone()),
-            deployment_log_path: over
-                .deployment_log_path
-                .clone()
-                .or_else(|| base.deployment_log_path.clone()),
-            unit_state_path: over
-                .unit_state_path
-                .clone()
-                .or_else(|| base.unit_state_path.clone()),
+            store_path: over.store_path.clone().or_else(|| base.store_path.clone()),
             dim_relations: over
                 .dim_relations
                 .clone()
@@ -204,11 +192,6 @@ impl PartialConfig {
             log_level: over.log_level.clone().or_else(|| base.log_level.clone()),
             runner: merge_entries(&base.runner, &over.runner),
             state: merge_entries(&base.state, &over.state),
-            deployment_log: over
-                .deployment_log
-                .clone()
-                .or_else(|| base.deployment_log.clone()),
-            unit_state: over.unit_state.clone().or_else(|| base.unit_state.clone()),
             api_key: over.api_key.clone().or_else(|| base.api_key.clone()),
         }
     }
@@ -224,10 +207,7 @@ impl PartialConfig {
             temp_folder_path: self
                 .temp_folder_path
                 .unwrap_or_else(default_temp_folder_path),
-            deployment_log_path: self
-                .deployment_log_path
-                .unwrap_or_else(default_deployment_log_path),
-            unit_state_path: self.unit_state_path.unwrap_or_else(default_unit_state_path),
+            store_path: self.store_path.unwrap_or_else(default_store_path),
             dim_relations: self.dim_relations.unwrap_or_else(default_dim_relations),
             file_name_separator: self
                 .file_name_separator
@@ -237,9 +217,6 @@ impl PartialConfig {
             log_level: self.log_level.unwrap_or_else(default_log_level),
             runner: self.runner,
             state: self.state,
-            deployment_log: self.deployment_log,
-            unit_state: self.unit_state,
-            mongodb_connection_string: None,
             api_key: self.api_key,
         }
     }
@@ -277,14 +254,10 @@ pub struct Config {
     pub plugins_path: PathBuf,
     /// Path to temp folder for runner execution
     pub temp_folder_path: PathBuf,
-    /// Root directory for the FS-jsonl deployment log backend (one
-    /// `{org}.jsonl` file per org), used unless `deployment_log` (Mongo) is
-    /// set
-    pub deployment_log_path: PathBuf,
-    /// Root directory for the FS-json unit state backend (one
-    /// `outputs.json` file per published key), used unless `unit_state`
-    /// (Mongo) is set
-    pub unit_state_path: PathBuf,
+    /// SQLite `Store` file backing the deployment log and unit state
+    /// (cross-unit outputs) - see
+    /// docs/specs/2026-09-03-cubtera-v3-architecture.md ยง9.
+    pub store_path: PathBuf,
 
     /// Dimension relations (hierarchy)
     pub dim_relations: Vec<String>,
@@ -305,17 +278,8 @@ pub struct Config {
     /// (see [`cubtera_domain::render_state_backend_config`])
     pub state: HashMap<String, StateBackendConfig>,
 
-    /// Deployment log configuration
-    pub deployment_log: Option<DeploymentLogConfig>,
-    /// Unit state (cross-unit outputs) configuration
-    pub unit_state: Option<UnitStateConfig>,
-
     /// Log level
     pub log_level: String,
-
-    /// MongoDB connection string (`CUBTERA_DB` env var only - wave 2, not
-    /// yet a `config.toml` field: there's no real Mongo adapter behind it)
-    pub mongodb_connection_string: Option<String>,
 
     /// API key `cubtera-api` requires on the `x-api-key` header for `/v1/*`
     /// routes. `None` means auth is disabled (local dev default). Prefer
@@ -347,16 +311,10 @@ fn default_temp_folder_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp/cubtera"))
 }
 
-fn default_deployment_log_path() -> PathBuf {
+fn default_store_path() -> PathBuf {
     home_dir()
-        .map(|h| h.join(".cubtera").join("dlog"))
-        .unwrap_or_else(|| PathBuf::from("/tmp/cubtera-dlog"))
-}
-
-fn default_unit_state_path() -> PathBuf {
-    home_dir()
-        .map(|h| h.join(".cubtera").join("state"))
-        .unwrap_or_else(|| PathBuf::from("/tmp/cubtera-state"))
+        .map(|h| h.join(".cubtera").join("store.sqlite"))
+        .unwrap_or_else(|| PathBuf::from("/tmp/cubtera-store.sqlite"))
 }
 
 fn default_dim_relations() -> Vec<String> {
@@ -416,10 +374,6 @@ impl Config {
             self.log_level = log_level;
         }
 
-        if let Some(db_url) = source.env("CUBTERA_DB") {
-            self.mongodb_connection_string = Some(db_url);
-        }
-
         if let Some(api_key) = source.env("CUBTERA_API_KEY") {
             self.api_key = Some(api_key);
         }
@@ -440,12 +394,8 @@ impl Config {
             self.temp_folder_path = PathBuf::from(temp_path);
         }
 
-        if let Some(dlog_path) = source.env("CUBTERA_DLOG_PATH") {
-            self.deployment_log_path = PathBuf::from(dlog_path);
-        }
-
-        if let Some(unit_state_path) = source.env("CUBTERA_UNIT_STATE_PATH") {
-            self.unit_state_path = PathBuf::from(unit_state_path);
+        if let Some(store_path) = source.env("CUBTERA_STORE_PATH") {
+            self.store_path = PathBuf::from(store_path);
         }
 
         if source.env("CUBTERA_ALWAYS_COPY_FILES").is_some() {
@@ -464,58 +414,6 @@ pub struct StateBackendConfig {
     /// Backend-specific options (supports handlebars templates)
     #[serde(flatten)]
     pub options: HashMap<String, serde_json::Value>,
-}
-
-/// Deployment log configuration - selects [`crate::config::MongoDeploymentLogRepository`]-style
-/// Mongo backend for the deployment log port; unset means fs-jsonl
-/// (`Config::deployment_log_path`).
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeploymentLogConfig {
-    /// MongoDB connection string for deployment logs
-    #[serde(alias = "connection_string")]
-    pub connection_string: String,
-    /// Database name - shared by every org, which is distinguished by each
-    /// entry's own `org` field
-    #[serde(default = "default_dlog_database")]
-    pub database: String,
-    /// Collection name
-    #[serde(default = "default_dlog_collection")]
-    pub collection: String,
-}
-
-fn default_dlog_database() -> String {
-    "cubtera".to_string()
-}
-
-fn default_dlog_collection() -> String {
-    "deployments".to_string()
-}
-
-/// Unit state (cross-unit outputs) configuration - selects
-/// `MongoUnitStateRepository` for the unit state port; unset means
-/// FS-json (`Config::unit_state_path`).
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UnitStateConfig {
-    /// MongoDB connection string for unit state
-    #[serde(alias = "connection_string")]
-    pub connection_string: String,
-    /// Database name - shared by every org, which is distinguished by each
-    /// document's own `org` field
-    #[serde(default = "default_unit_state_database")]
-    pub database: String,
-    /// Collection name
-    #[serde(default = "default_unit_state_collection")]
-    pub collection: String,
-}
-
-fn default_unit_state_database() -> String {
-    "cubtera".to_string()
-}
-
-fn default_unit_state_collection() -> String {
-    "unit_state".to_string()
 }
 
 #[cfg(test)]
@@ -619,7 +517,10 @@ mod tests {
     fn env_override_wins_over_file_and_selects_org() {
         let mut env = HashMap::new();
         env.insert("CUBTERA_ORG".to_string(), "teracub".to_string());
-        env.insert("CUBTERA_DB".to_string(), "mongodb://localhost".to_string());
+        env.insert(
+            "CUBTERA_STORE_PATH".to_string(),
+            "/tmp/cubtera-test-store.sqlite".to_string(),
+        );
         let src = StaticConfigSource {
             file_contents: Some(
                 r#"
@@ -634,8 +535,8 @@ mod tests {
         let config = ConfigProvider::load(&src).unwrap();
         assert_eq!(config.org, "teracub");
         assert_eq!(
-            config.mongodb_connection_string,
-            Some("mongodb://localhost".to_string())
+            config.store_path,
+            PathBuf::from("/tmp/cubtera-test-store.sqlite")
         );
     }
 }
