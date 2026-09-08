@@ -1,0 +1,17 @@
+[package]
+name = "cubtera-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Cubtera v3 kernel: validated identity types (Ident, DimRef, InstanceId) and content hashing. Zero I/O, zero async."
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+blake3 = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde_json = { workspace = true }
