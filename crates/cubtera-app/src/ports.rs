@@ -38,6 +38,51 @@ pub trait InventoryPort: Send + Sync {
 
     /// List all dimension names of a given type (excludes reserved names).
     async fn list_names(&self, org: &str, dim_type: &str) -> AppResult<Vec<String>>;
+
+    /// List non-JSON includes (files/folders, the on-disk convention's
+    /// `{name}{sep}{file}` entries) attached directly to this dimension -
+    /// empty if it has none. Kept as its own method (rather than folded
+    /// into `get_raw`'s `RawSections`) since includes are filesystem
+    /// artifacts, not JSON data - `Unit::materialize` (`cubtera-model`)
+    /// copies them into a unit's temp folder verbatim.
+    async fn list_includes(
+        &self,
+        org: &str,
+        dim_type: &str,
+        name: &str,
+    ) -> AppResult<Vec<cubtera_model::IncludeEntry>>;
+
+    /// List non-JSON includes attached to a dimension type's `.default`
+    /// record - gap-filled into every dimension of that type the same way
+    /// `.default` JSON sections are, but includes never merge field-by-field:
+    /// a dimension's own includes simply take precedence over same-named
+    /// defaults (see `UnitService`'s v2 equivalent, ported 1:1).
+    async fn list_default_includes(
+        &self,
+        org: &str,
+        dim_type: &str,
+    ) -> AppResult<Vec<cubtera_model::IncludeEntry>>;
+}
+
+/// Read-only unit manifest access `cubtera-app`'s use cases need to
+/// assemble a `cubtera_model::Unit` - the v3-native equivalent of v2's
+/// `cubtera_core::ports::UnitRepository`, using this crate's own types so
+/// `cubtera-app` never has to depend on `cubtera-core`.
+#[async_trait]
+pub trait UnitPort: Send + Sync {
+    /// Fetch `unit_name`'s manifest, if it exists.
+    async fn find_manifest(
+        &self,
+        org: &str,
+        unit_name: &str,
+    ) -> AppResult<Option<cubtera_model::Manifest>>;
+
+    /// Absolute path to `unit_name`'s own unit directory (its `manifest.toml`
+    /// and unit files), if it exists.
+    async fn get_unit_path(&self, org: &str, unit_name: &str) -> AppResult<Option<String>>;
+
+    /// List every known unit name for `org`.
+    async fn list_units(&self, org: &str) -> AppResult<Vec<String>>;
 }
 
 /// Wall-clock access, injected rather than called directly

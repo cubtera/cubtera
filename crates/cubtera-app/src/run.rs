@@ -588,6 +588,23 @@ mod tests {
         async fn list_names(&self, _org: &str, _dim_type: &str) -> AppResult<Vec<String>> {
             Ok(vec!["prod".to_string()])
         }
+
+        async fn list_includes(
+            &self,
+            _org: &str,
+            _dim_type: &str,
+            _name: &str,
+        ) -> AppResult<Vec<cubtera_model::IncludeEntry>> {
+            Ok(Vec::new())
+        }
+
+        async fn list_default_includes(
+            &self,
+            _org: &str,
+            _dim_type: &str,
+        ) -> AppResult<Vec<cubtera_model::IncludeEntry>> {
+            Ok(Vec::new())
+        }
     }
 
     struct FakeExecutor {

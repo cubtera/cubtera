@@ -9,6 +9,7 @@ members = [
     "crates/cubtera-store",
     "crates/cubtera-exec",
     "crates/cubtera-identity",
+    "crates/cubtera-inventory",
     "crates/cubtera-server",
     # v2 crates - retired phase-by-phase as v3 crates replace them
     "crates/cubtera-domain",
@@ -87,6 +88,7 @@ cubtera-source = { path = "crates/cubtera-source" }
 cubtera-store = { path = "crates/cubtera-store" }
 cubtera-exec = { path = "crates/cubtera-exec" }
 cubtera-identity = { path = "crates/cubtera-identity" }
+cubtera-inventory = { path = "crates/cubtera-inventory" }
 cubtera-domain = { path = "crates/cubtera-domain" }
 cubtera-core = { path = "crates/cubtera-core" }
 cubtera-config = { path = "crates/cubtera-config" }

@@ -67,10 +67,48 @@ impl InventoryPort for InventoryPortBridge {
             .await
             .map_err(backend_error)
     }
+
+    async fn list_includes(
+        &self,
+        org: &str,
+        dim_type: &str,
+        name: &str,
+    ) -> AppResult<Vec<cubtera_model::IncludeEntry>> {
+        let raw = self
+            .inner
+            .get_raw(org, dim_type, name)
+            .await
+            .map_err(backend_error)?;
+        Ok(raw.map(includes_of).unwrap_or_default())
+    }
+
+    async fn list_default_includes(
+        &self,
+        org: &str,
+        dim_type: &str,
+    ) -> AppResult<Vec<cubtera_model::IncludeEntry>> {
+        let raw = self
+            .inner
+            .get_raw_defaults(org, dim_type)
+            .await
+            .map_err(backend_error)?;
+        Ok(raw.map(includes_of).unwrap_or_default())
+    }
 }
 
 fn sections_of(raw: cubtera_domain::RawDimension) -> RawSections {
     raw.sections.into_iter().collect()
+}
+
+fn includes_of(raw: cubtera_domain::RawDimension) -> Vec<cubtera_model::IncludeEntry> {
+    raw.includes
+        .into_iter()
+        .map(|i| cubtera_model::IncludeEntry {
+            name: i.name,
+            source: i.source,
+            is_dir: i.is_dir,
+        })
+        .collect()
 }
 
 fn backend_error(e: cubtera_core::error::AppError) -> AppError {

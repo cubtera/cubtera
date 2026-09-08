@@ -277,6 +277,23 @@ mod tests {
                 .map(|n| n.keys().filter(|k| !k.starts_with('.')).cloned().collect())
                 .unwrap_or_default())
         }
+
+        async fn list_includes(
+            &self,
+            _org: &str,
+            _dim_type: &str,
+            _name: &str,
+        ) -> AppResult<Vec<cubtera_model::IncludeEntry>> {
+            Ok(Vec::new())
+        }
+
+        async fn list_default_includes(
+            &self,
+            _org: &str,
+            _dim_type: &str,
+        ) -> AppResult<Vec<cubtera_model::IncludeEntry>> {
+            Ok(Vec::new())
+        }
     }
 
     fn ident(s: &str) -> Ident {
