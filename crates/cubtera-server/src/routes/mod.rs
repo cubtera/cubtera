@@ -1,9 +1,12 @@
 //! Server routes.
 
+mod dlog;
 mod fleet;
 mod health;
+mod inventory;
 mod run;
 mod state;
+mod units;
 mod validate;
 
 use crate::auth::require_api_key;
@@ -19,6 +22,36 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
 
 fn v1_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
+        .route("/orgs", get(inventory::list_orgs))
+        .route("/{org}/dim-types", get(inventory::list_dim_types))
+        .route(
+            "/{org}/dims/{dim_type}",
+            get(inventory::list_dimension_names),
+        )
+        .route(
+            "/{org}/dims/{dim_type}/defaults",
+            get(inventory::get_defaults),
+        )
+        .route("/{org}/dims/{dim_type}/schema", get(inventory::get_schema))
+        .route(
+            "/{org}/dims/{dim_type}/{name}",
+            get(inventory::get_dimension),
+        )
+        .route(
+            "/{org}/dims/{dim_type}/{name}/parent",
+            get(inventory::get_parent),
+        )
+        .route(
+            "/{org}/dims/{dim_type}/{name}/children",
+            get(inventory::get_children),
+        )
+        .route(
+            "/{org}/dims/{dim_type}/{name}/validate",
+            get(inventory::validate_dimension),
+        )
+        .route("/{org}/units", get(units::list_units))
+        .route("/{org}/units/{name}", get(units::get_unit))
+        .route("/{org}/dlog", get(dlog::get_deployment_log))
         .route("/{org}/validate", get(validate::validate))
         .route("/{org}/fleet/status", get(fleet::status))
         .route("/{org}/units/{unit}/plan", post(run::plan))

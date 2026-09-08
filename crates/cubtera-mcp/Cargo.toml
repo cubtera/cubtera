@@ -3,21 +3,18 @@ name = "cubtera-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Cubtera MCP server - exposes inventory/unit/deployment-log queries as Model Context Protocol tools"
+description = "Cubtera MCP server - exposes inventory/unit/deployment-log/state-mesh queries as Model Context Protocol tools, proxied over HTTP to cubtera-server"
 
 [[bin]]
 name = "cubtera-mcp"
 path = "src/main.rs"
 
 [dependencies]
-cubtera-domain.workspace = true
-cubtera-core.workspace = true
-cubtera-config.workspace = true
-cubtera-persistence.workspace = true
+reqwest = { workspace = true, features = ["query"] }
 
 rmcp.workspace = true
 schemars.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

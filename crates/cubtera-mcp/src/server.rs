@@ -1,16 +1,17 @@
 //! MCP tool surface
 //!
-//! Read-only queries over the same `cubtera-core` services the CLI and REST
-//! API use (`DimensionService`, `UnitService`, `DeploymentLogRepository`) -
-//! so results get the same defaults gap-fill/parent-chain/access-policy
-//! behavior everywhere. Deliberately no `run`/write tools: giving an MCP
-//! client (typically an LLM) the ability to apply infrastructure changes is
-//! a product decision, not something this migration bundles in by default.
+//! Read-only queries proxied to `cubtera-server` over HTTP (see
+//! `client.rs`) - since P7, this is a pure client of the API: no
+//! `cubtera-core`/`cubtera-persistence` dependency, no direct filesystem or
+//! store access. Every tool result therefore gets the exact same
+//! defaults-gap-fill/parent-chain/access-policy/auth behavior as any other
+//! HTTP caller of `cubtera-server`. Deliberately no `plan`/`apply` tools:
+//! giving an MCP client (typically an LLM) the ability to apply
+//! infrastructure changes is a product decision, not something this
+//! migration bundles in by default.
 
+use crate::client::CubteraApiClient;
 use crate::error::to_mcp_error;
-use cubtera_core::ports::{DeploymentLogRepository, UnitStateRepository};
-use cubtera_core::services::{DimensionService, SchemaValidation, UnitService};
-use cubtera_domain::UnitStateKey;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -21,7 +22,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OrgParams {
@@ -94,10 +94,7 @@ fn json_result(value: Value) -> Result<CallToolResult, McpError> {
 
 #[derive(Clone)]
 pub struct CubteraMcp {
-    dimensions: Arc<DimensionService>,
-    units: Arc<UnitService>,
-    deployment_log: Arc<dyn DeploymentLogRepository>,
-    unit_state: Arc<dyn UnitStateRepository>,
+    client: CubteraApiClient,
     // Read by the `#[tool_handler]`-generated `ServerHandler` methods below;
     // rustc's dead-code pass doesn't see through that macro.
     #[allow(dead_code)]
@@ -106,25 +103,17 @@ pub struct CubteraMcp {
 
 #[tool_router]
 impl CubteraMcp {
-    pub fn new(
-        dimensions: Arc<DimensionService>,
-        units: Arc<UnitService>,
-        deployment_log: Arc<dyn DeploymentLogRepository>,
-        unit_state: Arc<dyn UnitStateRepository>,
-    ) -> Self {
+    pub fn new(client: CubteraApiClient) -> Self {
         Self {
-            dimensions,
-            units,
-            deployment_log,
-            unit_state,
+            client,
             tool_router: Self::tool_router(),
         }
     }
 
     #[tool(description = "List all organizations known to the inventory")]
     async fn list_orgs(&self) -> Result<CallToolResult, McpError> {
-        let orgs = self.dimensions.get_orgs().await.map_err(to_mcp_error)?;
-        json_result(serde_json::json!(orgs))
+        let orgs = self.client.list_orgs().await.map_err(to_mcp_error)?;
+        json_result(orgs)
     }
 
     #[tool(description = "List all dimension types defined for an organization (e.g. env, dc)")]
@@ -133,11 +122,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<OrgParams>,
     ) -> Result<CallToolResult, McpError> {
         let types = self
-            .dimensions
-            .get_types(&params.org)
+            .client
+            .list_dim_types(&params.org)
             .await
             .map_err(to_mcp_error)?;
-        json_result(serde_json::json!(types))
+        json_result(types)
     }
 
     #[tool(description = "List all dimension names of a given type (e.g. all 'dc' names)")]
@@ -146,11 +135,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<DimTypeParams>,
     ) -> Result<CallToolResult, McpError> {
         let names = self
-            .dimensions
-            .get_all_names(&params.org, &params.dim_type)
+            .client
+            .list_dimension_names(&params.org, &params.dim_type)
             .await
             .map_err(to_mcp_error)?;
-        json_result(serde_json::json!(names))
+        json_result(names)
     }
 
     #[tool(
@@ -161,11 +150,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<DimensionParams>,
     ) -> Result<CallToolResult, McpError> {
         let dim = self
-            .dimensions
-            .get_by_name(&params.org, &params.dim_type, &params.name)
+            .client
+            .get_dimension(&params.org, &params.dim_type, &params.name)
             .await
             .map_err(to_mcp_error)?;
-        json_result(dim.to_response_json())
+        json_result(dim)
     }
 
     #[tool(description = "Get the default dimension data for a type, if any is defined")]
@@ -174,11 +163,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<DimTypeParams>,
     ) -> Result<CallToolResult, McpError> {
         let dim = self
-            .dimensions
-            .get_defaults(&params.org, &params.dim_type)
+            .client
+            .get_dimension_defaults(&params.org, &params.dim_type)
             .await
             .map_err(to_mcp_error)?;
-        json_result(dim.map(|d| d.to_response_json()).unwrap_or(Value::Null))
+        json_result(dim)
     }
 
     #[tool(
@@ -189,11 +178,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<DimTypeParams>,
     ) -> Result<CallToolResult, McpError> {
         let schema = self
-            .dimensions
-            .get_schema(&params.org, &params.dim_type)
+            .client
+            .get_dimension_schema(&params.org, &params.dim_type)
             .await
             .map_err(to_mcp_error)?;
-        json_result(schema.unwrap_or(Value::Null))
+        json_result(schema)
     }
 
     #[tool(description = "Get the parent of a dimension, following meta.parent, if any")]
@@ -202,11 +191,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<DimensionParams>,
     ) -> Result<CallToolResult, McpError> {
         let parent = self
-            .dimensions
-            .get_parent(&params.org, &params.dim_type, &params.name)
+            .client
+            .get_dimension_parent(&params.org, &params.dim_type, &params.name)
             .await
             .map_err(to_mcp_error)?;
-        json_result(parent.map(|d| d.to_response_json()).unwrap_or(Value::Null))
+        json_result(parent)
     }
 
     #[tool(
@@ -217,14 +206,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<DimensionParams>,
     ) -> Result<CallToolResult, McpError> {
         let children = self
-            .dimensions
-            .get_children(&params.org, &params.dim_type, &params.name)
+            .client
+            .get_dimension_children(&params.org, &params.dim_type, &params.name)
             .await
             .map_err(to_mcp_error)?;
-        json_result(serde_json::json!(children
-            .iter()
-            .map(cubtera_domain::Dimension::to_response_json)
-            .collect::<Vec<_>>()))
+        json_result(children)
     }
 
     #[tool(
@@ -235,15 +221,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<DimensionParams>,
     ) -> Result<CallToolResult, McpError> {
         let result = self
-            .dimensions
-            .validate_schema(&params.org, &params.dim_type, &params.name)
+            .client
+            .validate_dimension(&params.org, &params.dim_type, &params.name)
             .await
             .map_err(to_mcp_error)?;
-        let (valid, errors) = match result {
-            SchemaValidation::NoSchema | SchemaValidation::Valid => (true, Vec::new()),
-            SchemaValidation::Invalid(errors) => (false, errors),
-        };
-        json_result(serde_json::json!({ "valid": valid, "errors": errors }))
+        json_result(result)
     }
 
     #[tool(description = "List all units defined for an organization")]
@@ -252,11 +234,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<OrgParams>,
     ) -> Result<CallToolResult, McpError> {
         let units = self
-            .units
+            .client
             .list_units(&params.org)
             .await
             .map_err(to_mcp_error)?;
-        json_result(serde_json::json!(units))
+        json_result(units)
     }
 
     #[tool(description = "Get a unit's manifest (dimensions, runner type, allow/deny lists, etc.)")]
@@ -265,25 +247,26 @@ impl CubteraMcp {
         Parameters(params): Parameters<UnitParams>,
     ) -> Result<CallToolResult, McpError> {
         let manifest = self
-            .units
-            .get_manifest(&params.org, &params.unit_name)
+            .client
+            .get_unit_manifest(&params.org, &params.unit_name)
             .await
             .map_err(to_mcp_error)?;
-        json_result(serde_json::json!(manifest))
+        json_result(manifest)
     }
 
     #[tool(
-        description = "Get a producer unit's published outputs ([outputs] publish = true) for an exact dims/ext key - not a consumer's [inputs] projection, which only happens inside `cubtera run`"
+        description = "Get a producer unit's published state-mesh output (schema version, revision, values) for an exact dims/ext key - not a consumer's [inputs] projection, which only happens inside `cubtera plan`/`apply`"
     )]
     async fn get_unit_state(
         &self,
         Parameters(params): Parameters<UnitStateParams>,
     ) -> Result<CallToolResult, McpError> {
-        let key = UnitStateKey::try_new(&params.org, &params.unit_name, params.dims, params.ext)
-            .map_err(cubtera_core::error::AppError::from)
+        let record = self
+            .client
+            .get_unit_state(&params.org, &params.unit_name, &params.dims, &params.ext)
+            .await
             .map_err(to_mcp_error)?;
-        let record = self.unit_state.get(&key).await.map_err(to_mcp_error)?;
-        json_result(serde_json::json!(record))
+        json_result(record)
     }
 
     #[tool(
@@ -294,11 +277,11 @@ impl CubteraMcp {
         Parameters(params): Parameters<DeploymentLogParams>,
     ) -> Result<CallToolResult, McpError> {
         let entries = self
-            .deployment_log
-            .find(&params.org, &params.query, params.limit.or(Some(10)))
+            .client
+            .get_deployment_log(&params.org, &params.query, params.limit.or(Some(10)))
             .await
             .map_err(to_mcp_error)?;
-        json_result(serde_json::json!(entries))
+        json_result(entries)
     }
 }
 
@@ -310,8 +293,9 @@ impl ServerHandler for CubteraMcp {
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(
                 "Read-only access to Cubtera's inventory (organizations, dimension types, \
-                 dimensions with defaults/parent-chain resolved), unit manifests, and the \
-                 deployment log. No tool here executes infrastructure changes."
+                 dimensions with defaults/parent-chain resolved), unit manifests, state-mesh \
+                 outputs, and the deployment log - proxied over HTTP to a running \
+                 cubtera-server. No tool here executes infrastructure changes."
                     .to_string(),
             )
     }

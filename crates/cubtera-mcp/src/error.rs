@@ -1,23 +1,21 @@
-//! `AppError` -> MCP `ErrorData` mapping
+//! `ClientError` -> MCP `ErrorData` mapping
 //!
 //! Same boundary rule as `cubtera-api`'s `problem+json` and `cubtera`'s exit
-//! codes (migration plan item 9): `AppError` only gets translated to a
-//! protocol-specific shape at the interface layer, never inside
-//! domain/core/infra.
+//! codes: an error only gets translated to a protocol-specific shape at the
+//! interface layer. Since P7, `cubtera-mcp` is a pure HTTP client of
+//! `cubtera-server` (see `client.rs`), so the thing being translated here is
+//! the HTTP status `cubtera-server`'s `ApiError` returned, not a local
+//! `AppError` variant.
 
-use cubtera_core::error::AppError;
+use crate::client::ClientError;
 use rmcp::ErrorData as McpError;
 
-pub fn to_mcp_error(err: AppError) -> McpError {
+pub fn to_mcp_error(err: ClientError) -> McpError {
     let message = err.to_string();
-    match err {
-        AppError::NotFound { .. } => McpError::resource_not_found(message, None),
-        AppError::Validation(_) | AppError::Domain(_) | AppError::AccessDenied(_) => {
-            McpError::invalid_params(message, None)
-        }
-        AppError::Repository(_) | AppError::Runner(_) | AppError::Io(_) | AppError::Config(_) => {
-            McpError::internal_error(message, None)
-        }
+    match err.status {
+        Some(404) => McpError::resource_not_found(message, None),
+        Some(400) | Some(403) => McpError::invalid_params(message, None),
+        _ => McpError::internal_error(message, None),
     }
 }
 
@@ -26,34 +24,30 @@ mod tests {
     use super::*;
     use rmcp::model::ErrorCode;
 
+    fn err(status: Option<u16>) -> ClientError {
+        ClientError {
+            status,
+            message: "boom".to_string(),
+        }
+    }
+
     #[test]
     fn not_found_maps_to_resource_not_found() {
-        let err = to_mcp_error(AppError::not_found("dimension", "dc:missing"));
-        assert_eq!(err.code, ErrorCode::RESOURCE_NOT_FOUND);
-        assert!(err.message.contains("dc:missing"));
-    }
-
-    #[test]
-    fn validation_and_access_denied_map_to_invalid_params() {
         assert_eq!(
-            to_mcp_error(AppError::validation("bad input")).code,
-            ErrorCode::INVALID_PARAMS
-        );
-        assert_eq!(
-            to_mcp_error(AppError::access_denied("nope")).code,
-            ErrorCode::INVALID_PARAMS
+            to_mcp_error(err(Some(404))).code,
+            ErrorCode::RESOURCE_NOT_FOUND
         );
     }
 
     #[test]
-    fn repository_and_io_errors_map_to_internal_error() {
-        assert_eq!(
-            to_mcp_error(AppError::repository("db down")).code,
-            ErrorCode::INTERNAL_ERROR
-        );
-        assert_eq!(
-            to_mcp_error(AppError::io("disk full")).code,
-            ErrorCode::INTERNAL_ERROR
-        );
+    fn bad_request_and_forbidden_map_to_invalid_params() {
+        assert_eq!(to_mcp_error(err(Some(400))).code, ErrorCode::INVALID_PARAMS);
+        assert_eq!(to_mcp_error(err(Some(403))).code, ErrorCode::INVALID_PARAMS);
+    }
+
+    #[test]
+    fn server_errors_and_network_failures_map_to_internal_error() {
+        assert_eq!(to_mcp_error(err(Some(500))).code, ErrorCode::INTERNAL_ERROR);
+        assert_eq!(to_mcp_error(err(None)).code, ErrorCode::INTERNAL_ERROR);
     }
 }

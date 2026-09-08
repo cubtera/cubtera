@@ -3,28 +3,39 @@
 //! Exposes read-only inventory/unit/deployment-log queries as Model Context
 //! Protocol tools over stdio, so MCP clients (IDEs, agents) can look up
 //! Cubtera's dimensions and manifests directly. This is a proper MCP
-//! server (via the `rmcp` SDK), not the REST-shaped prototype `test1` had -
-//! see the migration plan's wave 2 note on `cubtera-mcp`.
+//! server (via the `rmcp` SDK), not the REST-shaped prototype `test1` had.
+//!
+//! Since P7, this is a pure HTTP client of `cubtera-server` (see
+//! `client.rs`) - it has no `cubtera-core`/`cubtera-persistence` dependency
+//! and never touches the filesystem or a store directly. Point it at a
+//! running `cubtera-server` with `--server-url`/`CUBTERA_SERVER_URL`.
 
+mod client;
 mod error;
 mod server;
 
 use clap::Parser;
-use cubtera_core::services::{DimensionService, UnitService};
-use cubtera_persistence::Repositories;
+use client::CubteraApiClient;
 use rmcp::transport::stdio;
 use rmcp::ServiceExt;
 use server::CubteraMcp;
-use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "cubtera-mcp")]
 #[command(author, version, about = "Cubtera MCP server")]
 struct Cli {
-    /// Configuration file path
-    #[arg(short, long)]
-    config: Option<String>,
+    /// Base URL of a running cubtera-server (env: CUBTERA_SERVER_URL)
+    #[arg(
+        long,
+        env = "CUBTERA_SERVER_URL",
+        default_value = "http://127.0.0.1:8081"
+    )]
+    server_url: String,
+
+    /// API key to send as `x-api-key` (env: CUBTERA_API_KEY)
+    #[arg(long, env = "CUBTERA_API_KEY")]
+    api_key: Option<String>,
 }
 
 #[tokio::main]
@@ -39,23 +50,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
-    let config = match &cli.config {
-        Some(path) => cubtera_config::Config::load_from_path(std::path::Path::new(path)),
-        None => cubtera_config::Config::load(),
-    }?;
-
-    let repos = Repositories::from_config(&config).await?;
-    let hierarchy = Repositories::hierarchy(&config);
-
-    let dimensions = Arc::new(DimensionService::new(repos.inventory, hierarchy));
-    let unit_state = repos.unit_state.clone();
-    let units = Arc::new(
-        UnitService::new(repos.units, dimensions.clone()).with_unit_state(repos.unit_state),
+    tracing::info!(
+        "Starting Cubtera MCP server (proxying cubtera-server at {})",
+        cli.server_url
     );
 
-    tracing::info!("Starting Cubtera MCP server");
-
-    let service = CubteraMcp::new(dimensions, units, repos.deployment_log, unit_state)
+    let client = CubteraApiClient::new(cli.server_url, cli.api_key);
+    let service = CubteraMcp::new(client)
         .serve(stdio())
         .await
         .inspect_err(|e| {
