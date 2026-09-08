@@ -14,13 +14,14 @@
 
 use crate::app_bridge::InventoryPortBridge;
 use crate::exec_bridge::ExecutorBridge;
-use cubtera_app::ports::{Executor, SystemClock};
-use cubtera_app::{BindingUseCase, InventoryPort, ResolveUseCase, RunUseCase};
+use cubtera_app::ports::{Executor, IdentityProvider, SystemClock};
+use cubtera_app::{BindingUseCase, InputRequest, InventoryPort, ResolveUseCase, RunUseCase};
 use cubtera_config::Config;
 use cubtera_core::ports::Workspace as _;
 use cubtera_core::services::{DimensionService, UnitService};
-use cubtera_domain::Unit;
-use cubtera_kernel::{Digest, Ident, InstanceId};
+use cubtera_domain::{project_state_key, Unit};
+use cubtera_identity::EnvIdentityProvider;
+use cubtera_kernel::{Digest, DimRef, Ident, InstanceId};
 use cubtera_persistence::fs::FsWorkspace;
 use cubtera_persistence::Repositories;
 use cubtera_source::FsSource;
@@ -61,8 +62,65 @@ pub fn build_use_case(
     let executor: Arc<dyn Executor> =
         Arc::new(ExecutorBridge::new(executor_workspace_root, tf_cache_dir));
     let clock = Arc::new(SystemClock);
+    let identity: Arc<dyn IdentityProvider> = Arc::new(EnvIdentityProvider);
 
-    Ok(RunUseCase::new(resolve, source, store, executor, clock))
+    Ok(RunUseCase::new(
+        resolve, source, store, executor, clock, identity,
+    ))
+}
+
+/// Build the `InputRequest`s a `plan`/`apply` call should carry for
+/// `unit`'s `[inputs.<alias>]` entries - the v3-side equivalent of
+/// `UnitService::resolve_inputs` (`crates/cubtera-core/src/services/unit.rs`),
+/// projecting each producer's required dimensions onto `unit`'s own
+/// resolved chain when the manifest doesn't name them explicitly. Returns
+/// `vec![]` for a manifest with no `[inputs]` at all.
+pub async fn build_input_requests(
+    config: &Config,
+    repos: &Repositories,
+    unit: &Unit,
+) -> Result<Vec<InputRequest>, Box<dyn std::error::Error>> {
+    let org = Ident::parse(&config.org)?;
+    let mut requests = Vec::with_capacity(unit.manifest.inputs.len());
+
+    for (alias, spec) in &unit.manifest.inputs {
+        let dims = match &spec.dims {
+            Some(explicit) => explicit.clone(),
+            None => {
+                let producer_manifest = repos
+                    .units
+                    .find_manifest(&config.org, &spec.unit)
+                    .await?
+                    .ok_or_else(|| format!("unit '{}' not found", spec.unit))?;
+                project_state_key(&unit.dim_key_path, &producer_manifest.dimensions)?
+            }
+        };
+        let mut dim_refs = Vec::with_capacity(dims.len());
+        for d in &dims {
+            dim_refs.push(DimRef::parse(d)?);
+        }
+        let mut ext_refs = Vec::new();
+        for e in spec.ext.iter().flatten() {
+            ext_refs.push(DimRef::parse(e)?);
+        }
+
+        let producer =
+            InstanceId::try_new(org.clone(), Ident::parse(&spec.unit)?, dim_refs, ext_refs)?;
+        let expects = spec
+            .expects
+            .as_deref()
+            .map(semver::VersionReq::parse)
+            .transpose()?;
+
+        requests.push(InputRequest {
+            alias: alias.clone(),
+            producer,
+            expects,
+            required: spec.is_required(),
+        });
+    }
+
+    Ok(requests)
 }
 
 /// Wire a `BindingUseCase` against the real inventory/source/store

@@ -10,11 +10,15 @@ pub enum ModelError {
         dim_type: String,
         errors: Vec<String>,
     },
-    /// A `Binding.selector` expression (ยง5.4) failed to parse - malformed
-    /// syntax, not a runtime evaluation failure (evaluation against a
-    /// missing field is `false`, never an error - see
+    /// A `Binding.selector` expression (section 5.4) failed to parse -
+    /// malformed syntax, not a runtime evaluation failure (evaluation
+    /// against a missing field is `false`, never an error - see
     /// `Selector::evaluate`'s doc comment).
     Selector(String),
+    /// `project_state_key` (section 5.5) couldn't unambiguously project a
+    /// consumer's resolved dimension chain onto a producer's required
+    /// dimension types - never a guess, always a hard error.
+    InputResolution(String),
 }
 
 impl fmt::Display for ModelError {
@@ -38,6 +42,7 @@ impl fmt::Display for ModelError {
                 )
             }
             Self::Selector(msg) => write!(f, "invalid selector: {msg}"),
+            Self::InputResolution(msg) => write!(f, "{msg}"),
         }
     }
 }

@@ -19,6 +19,15 @@ pub struct UnitService {
     /// manifest that declares inputs anyway is a hard configuration error,
     /// never a silent skip (see `Self::resolve_inputs`).
     unit_state: Option<Arc<dyn UnitStateRepository>>,
+    /// P6 migration seam (docs/specs/2026-09-03-cubtera-v3-architecture.md
+    /// section 5.5): `crates/cubtera/src/commands/run_support.rs` resolves
+    /// `[inputs.<alias>]` itself, against `cubtera-store`'s `OutputSet`s
+    /// (schema-checked, revision-tracked) rather than the legacy
+    /// `UnitStateRepository`. Skips `Self::resolve_inputs` entirely when
+    /// set, instead of either erroring on `[inputs]` with no legacy store
+    /// wired, or resolving into a `Unit.resolved_inputs` the v3 pipeline
+    /// immediately discards.
+    skip_input_resolution: bool,
 }
 
 impl UnitService {
@@ -31,12 +40,21 @@ impl UnitService {
             unit_repository,
             dimensions,
             unit_state: None,
+            skip_input_resolution: false,
         }
     }
 
     /// Enable `[inputs.<alias>]` resolution against a unit state store.
     pub fn with_unit_state(mut self, unit_state: Arc<dyn UnitStateRepository>) -> Self {
         self.unit_state = Some(unit_state);
+        self
+    }
+
+    /// Skip `[inputs.<alias>]` resolution entirely, regardless of whether
+    /// the manifest declares any - see the `skip_input_resolution` field
+    /// doc comment.
+    pub fn without_legacy_input_resolution(mut self) -> Self {
+        self.skip_input_resolution = true;
         self
     }
 
@@ -175,7 +193,9 @@ impl UnitService {
             }
         }
 
-        unit = self.resolve_inputs(org, unit_name, unit).await?;
+        if !self.skip_input_resolution {
+            unit = self.resolve_inputs(org, unit_name, unit).await?;
+        }
 
         Ok(unit)
     }
@@ -470,6 +490,7 @@ mod tests {
                 dims: None,
                 ext: None,
                 required,
+                expects: None,
             },
         );
         manifest

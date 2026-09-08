@@ -23,6 +23,21 @@ pub enum OutputValue {
     Secret(SecretRef),
 }
 
+impl OutputValue {
+    /// Redaction by type (section 5.5/8): a `Plain` value prints as-is, a
+    /// `Secret` never prints its ref (which could itself leak a path/URI
+    /// worth hiding) - just a fixed marker. For human/JSON display
+    /// (`cubtera state get`, logs) - resolving a `Secret` into its real
+    /// value is `cubtera-identity`'s job, at execution time only, never at
+    /// display time.
+    pub fn redacted(&self) -> serde_json::Value {
+        match self {
+            OutputValue::Plain(v) => v.clone(),
+            OutputValue::Secret(_) => serde_json::Value::String("<redacted>".to_string()),
+        }
+    }
+}
+
 /// State-mesh v2's producer-side record (ยง5.5): versioned, schema-checked,
 /// and never storing a sensitive value in the clear. `revision` is assigned
 /// by `Store::put_output_set` (monotonic per `InstanceId`) - the thing a

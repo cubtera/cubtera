@@ -8,13 +8,14 @@
 //! apply) is `Binding`/P5 scope - this command is the single-instance
 //! primitive P5's batches will eventually call.
 
-use super::run_support::{config_digest, default_actor, prepare};
+use super::run_support::{build_input_requests, config_digest, default_actor, prepare};
 use super::Ctx;
 use clap::Args;
 use cubtera_app::ApplyRequest;
 use cubtera_config::Config;
 use cubtera_kernel::Ident;
 use cubtera_model::{PlanId, RunStatus};
+use cubtera_persistence::Repositories;
 use std::time::Duration;
 
 #[derive(Args)]
@@ -87,6 +88,8 @@ pub async fn run(
                 args.outputs_schema_version
             )
         })?;
+    let repos = Repositories::from_config(config).await?;
+    let inputs = build_input_requests(config, &repos, &prepared.unit).await?;
 
     let run = prepared
         .use_case
@@ -101,6 +104,7 @@ pub async fn run(
                 publish_outputs,
                 outputs_schema_version,
                 lease_ttl: Duration::from_secs(args.lease_ttl_seconds),
+                inputs,
             },
         )
         .await?;

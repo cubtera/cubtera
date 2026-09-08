@@ -20,7 +20,7 @@
 //! everything else raced.
 
 use crate::error::{AppError, AppResult};
-use crate::ports::{Clock, ExecRequest, Executor};
+use crate::ports::{Clock, ExecRequest, Executor, IdentityProvider};
 use crate::resolve::ResolveUseCase;
 use cubtera_kernel::{Digest, Ident, InstanceId};
 use cubtera_model::{
@@ -34,6 +34,22 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// One `[inputs.<alias>]` entry, already resolved to a concrete producer
+/// `InstanceId` (projection against the producer's own required
+/// dimensions - `cubtera_model::project_state_key` - is the caller's job;
+/// see `crates/cubtera/src/commands/run_support.rs`, which already has
+/// both the consumer's resolved dim chain and the producer's manifest
+/// on hand). State-mesh v2 (section 5.5): `expects` is checked against the
+/// producer's `OutputSet::schema_version` before the value is trusted for
+/// anything.
+#[derive(Debug, Clone)]
+pub struct InputRequest {
+    pub alias: String,
+    pub producer: InstanceId,
+    pub expects: Option<semver::VersionReq>,
+    pub required: bool,
+}
+
 /// What to resolve and run for `cubtera plan`.
 pub struct PlanRequest {
     pub instance: InstanceId,
@@ -44,6 +60,7 @@ pub struct PlanRequest {
     /// pin set, so a config change between `plan` and `apply` is detected.
     pub config_digest: Digest,
     pub ttl_seconds: i64,
+    pub inputs: Vec<InputRequest>,
 }
 
 /// What to run for `cubtera apply --plan <id>`.
@@ -60,6 +77,11 @@ pub struct ApplyRequest {
     pub publish_outputs: bool,
     pub outputs_schema_version: semver::Version,
     pub lease_ttl: Duration,
+    /// Must be the exact same list `plan()` was given for this instance -
+    /// `apply` re-resolves inputs itself (so `Plan::pins_match` catches a
+    /// producer that moved between `plan` and `apply`, same as package/
+    /// inventory/config drift), it doesn't replay `plan`'s resolution.
+    pub inputs: Vec<InputRequest>,
 }
 
 pub struct RunUseCase {
@@ -68,6 +90,7 @@ pub struct RunUseCase {
     store: Arc<dyn Store>,
     executor: Arc<dyn Executor>,
     clock: Arc<dyn Clock>,
+    identity: Arc<dyn IdentityProvider>,
 }
 
 impl RunUseCase {
@@ -77,6 +100,7 @@ impl RunUseCase {
         store: Arc<dyn Store>,
         executor: Arc<dyn Executor>,
         clock: Arc<dyn Clock>,
+        identity: Arc<dyn IdentityProvider>,
     ) -> Self {
         Self {
             resolve,
@@ -84,6 +108,7 @@ impl RunUseCase {
             store,
             executor,
             clock,
+            identity,
         }
     }
 
@@ -97,6 +122,7 @@ impl RunUseCase {
         &self,
         instance: &InstanceId,
         config_digest: Digest,
+        inputs: &[InputRequest],
     ) -> AppResult<(ResolutionManifest, BTreeMap<String, Value>)> {
         let org = instance.org().as_str();
         let mut variables: BTreeMap<String, Value> = BTreeMap::new();
@@ -136,7 +162,72 @@ impl RunUseCase {
         let mut resolution =
             ResolutionManifest::empty(package.content_hash, inventory_revision, config_digest);
         resolution.inventory_digests = inventory_digests;
+
+        for input in inputs {
+            match self.resolve_input(input).await? {
+                Some((value, revision)) => {
+                    variables.insert(input.alias.clone(), value);
+                    resolution
+                        .consumed_inputs
+                        .insert(input.alias.clone(), revision);
+                }
+                None => {
+                    // Not required and the producer has never published -
+                    // absence itself is part of the pin set too (an
+                    // optional input showing up between `plan` and `apply`
+                    // is drift, same as one disappearing), so record it as
+                    // "no revision" via simply not inserting - `plan`'s and
+                    // `apply`'s `consumed_inputs` maps only agree if both
+                    // runs saw the same absence.
+                }
+            }
+        }
+
         Ok((resolution, variables))
+    }
+
+    /// Fetch and validate one `[inputs.<alias>]` entry: missing +
+    /// `required` is a hard [`AppError::NotFound`]; missing + optional is
+    /// `Ok(None)` (skipped, not defaulted to anything); a `schema_version`
+    /// that doesn't satisfy `expects` is a hard [`AppError::Validation`]
+    /// regardless of `required` - a producer publishing an incompatible
+    /// version is never treated as "absent". Every [`OutputValue::Secret`]
+    /// is resolved through `IdentityProvider` before it's exposed to a
+    /// runner as a variable - `cubtera-store` never holds a resolved
+    /// secret value, only the ref.
+    async fn resolve_input(&self, input: &InputRequest) -> AppResult<Option<(Value, Revision)>> {
+        let Some(set) = self.store.get_output_set(&input.producer).await? else {
+            if input.required {
+                return Err(AppError::not_found(
+                    "unit state",
+                    input.producer.canonical(),
+                ));
+            }
+            return Ok(None);
+        };
+
+        if let Some(expects) = &input.expects {
+            if !set.satisfies(expects) {
+                return Err(AppError::validation(format!(
+                    "input '{}': producer {} publishes schema {}, which does not satisfy \
+                     the required '{}'",
+                    input.alias,
+                    input.producer.canonical(),
+                    set.schema_version,
+                    expects
+                )));
+            }
+        }
+
+        let mut resolved = serde_json::Map::new();
+        for (key, value) in &set.values {
+            let json = match value {
+                OutputValue::Plain(v) => v.clone(),
+                OutputValue::Secret(secret) => self.identity.resolve_secret(&secret.0).await?,
+            };
+            resolved.insert(key.clone(), json);
+        }
+        Ok(Some((Value::Object(resolved), set.revision)))
     }
 
     fn mint_id(&self, instance: &InstanceId, salt: &str, now: i64) -> String {
@@ -161,7 +252,7 @@ impl RunUseCase {
         }
 
         let (mut resolution, variables) = self
-            .build_resolution(&req.instance, req.config_digest)
+            .build_resolution(&req.instance, req.config_digest, &req.inputs)
             .await?;
         resolution.runner_version = self
             .executor
@@ -234,7 +325,7 @@ impl RunUseCase {
         }
 
         let (mut current, variables) = self
-            .build_resolution(&plan.instance, req.config_digest)
+            .build_resolution(&plan.instance, req.config_digest, &req.inputs)
             .await?;
         current.runner_version = self
             .executor
@@ -315,6 +406,21 @@ impl RunUseCase {
         let _ = self
             .update_instance_after_run(&plan.instance, current.package_digest, &run)
             .await;
+
+        // Record every input this run actually consumed - best-effort,
+        // same rationale: `cubtera state ls --stale` losing track of one
+        // consumer is a visibility gap, never a reason to fail an
+        // otherwise-successful apply.
+        if outcome.success {
+            for input in &req.inputs {
+                if let Some(revision) = current.consumed_inputs.get(&input.alias) {
+                    let _ = self
+                        .store
+                        .mark_consumed(&plan.instance, &input.producer, *revision)
+                        .await;
+                }
+            }
+        }
 
         Ok(run)
     }
@@ -581,7 +687,22 @@ mod tests {
             store,
             Arc::new(executor),
             Arc::new(clock),
+            Arc::new(FakeIdentity),
         )
+    }
+
+    /// Errors on any secret ref - no test in this module publishes a
+    /// `[outputs] sensitive = [...]` entry, so resolution should never be
+    /// reached; a real `EnvIdentityProvider` lives in `cubtera-identity`.
+    struct FakeIdentity;
+
+    #[async_trait]
+    impl crate::ports::IdentityProvider for FakeIdentity {
+        async fn resolve_secret(&self, secret_ref: &str) -> AppResult<Value> {
+            Err(AppError::backend(format!(
+                "FakeIdentity cannot resolve {secret_ref:?}"
+            )))
+        }
     }
 
     #[tokio::test]
@@ -600,6 +721,7 @@ mod tests {
                 actor: Ident::parse("ci").unwrap(),
                 config_digest: Digest::of(b"cfg"),
                 ttl_seconds: 3600,
+                inputs: vec![],
             })
             .await
             .unwrap_err();
@@ -625,6 +747,7 @@ mod tests {
                 actor: Ident::parse("ci").unwrap(),
                 config_digest: Digest::of(b"cfg"),
                 ttl_seconds: 3600,
+                inputs: vec![],
             })
             .await
             .unwrap();
@@ -643,6 +766,7 @@ mod tests {
                     publish_outputs: true,
                     outputs_schema_version: semver::Version::parse("1.0.0").unwrap(),
                     lease_ttl: Duration::from_secs(60),
+                    inputs: vec![],
                 },
             )
             .await
@@ -687,6 +811,7 @@ mod tests {
                 actor: Ident::parse("ci").unwrap(),
                 config_digest: Digest::of(b"cfg"),
                 ttl_seconds: 1,
+                inputs: vec![],
             })
             .await
             .unwrap();
@@ -703,6 +828,7 @@ mod tests {
                     publish_outputs: false,
                     outputs_schema_version: semver::Version::parse("1.0.0").unwrap(),
                     lease_ttl: Duration::from_secs(60),
+                    inputs: vec![],
                 },
             )
             .await
@@ -724,6 +850,7 @@ mod tests {
                 actor: Ident::parse("ci").unwrap(),
                 config_digest: Digest::of(b"cfg"),
                 ttl_seconds: 3600,
+                inputs: vec![],
             })
             .await
             .unwrap();
@@ -749,8 +876,199 @@ mod tests {
                     publish_outputs: false,
                     outputs_schema_version: semver::Version::parse("1.0.0").unwrap(),
                     lease_ttl: Duration::from_secs(60),
+                    inputs: vec![],
                 },
             )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    fn producer_instance() -> InstanceId {
+        InstanceId::try_new(
+            Ident::parse("cubtera").unwrap(),
+            Ident::parse("platform").unwrap(),
+            [DimRef::parse("dome:prod").unwrap()],
+            [],
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn apply_resolves_a_required_input_and_records_the_consumed_revision() {
+        let (_tmp, source) = unit_source("variable \"x\" {}").await;
+        let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+
+        // Producer publishes directly - this test is about the consumer
+        // side (`InputRequest` resolution/`mark_consumed`), not about
+        // `publish_outputs` (covered by
+        // `plan_then_apply_round_trip_succeeds_and_publishes_outputs`).
+        let published = OutputSet {
+            schema_version: semver::Version::parse("1.2.0").unwrap(),
+            values: BTreeMap::from([(
+                "vpc_id".to_string(),
+                OutputValue::Plain(serde_json::json!("vpc-1")),
+            )]),
+            produced_by: RunId::new("run-producer".to_string()),
+            source_hash: Digest::of(b"producer"),
+            revision: Revision::from_raw(0),
+        };
+        let first_revision = store
+            .put_output_set(&producer_instance(), &published)
+            .await
+            .unwrap();
+
+        let uc = use_case(
+            source,
+            store.clone(),
+            FakeExecutor::ok(),
+            SeqClock::new(1000, 1000),
+        );
+        let input = InputRequest {
+            alias: "platform".to_string(),
+            producer: producer_instance(),
+            expects: Some(semver::VersionReq::parse("^1.0").unwrap()),
+            required: true,
+        };
+
+        let plan = uc
+            .plan(PlanRequest {
+                instance: instance(),
+                runner_type: "tofu".into(),
+                command: vec!["plan".into()],
+                actor: Ident::parse("ci").unwrap(),
+                config_digest: Digest::of(b"cfg"),
+                ttl_seconds: 3600,
+                inputs: vec![input.clone()],
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.resolution.consumed_inputs.get("platform"),
+            Some(&first_revision)
+        );
+
+        let run = uc
+            .apply(
+                &plan.id,
+                ApplyRequest {
+                    runner_type: "tofu".into(),
+                    command: vec!["apply".into()],
+                    auto_approve: true,
+                    actor: Ident::parse("ci").unwrap(),
+                    config_digest: Digest::of(b"cfg"),
+                    publish_outputs: false,
+                    outputs_schema_version: semver::Version::parse("1.0.0").unwrap(),
+                    lease_ttl: Duration::from_secs(60),
+                    inputs: vec![input],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(run.status, RunStatus::Succeeded);
+
+        // Not stale yet - the consumer just applied against the producer's
+        // only published revision.
+        let org = Ident::parse("cubtera").unwrap();
+        assert!(store.list_stale_consumers(&org).await.unwrap().is_empty());
+
+        // Producer moves on to a new revision without the consumer
+        // re-applying - `state ls --stale`'s exact scenario.
+        store
+            .put_output_set(&producer_instance(), &published)
+            .await
+            .unwrap();
+        let stale = store.list_stale_consumers(&org).await.unwrap();
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].consumer, instance());
+        assert_eq!(stale[0].producer, producer_instance());
+        assert_eq!(stale[0].consumed_revision, first_revision);
+    }
+
+    #[tokio::test]
+    async fn plan_fails_when_a_required_input_was_never_published() {
+        let (_tmp, source) = unit_source("variable \"x\" {}").await;
+        let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+        let uc = use_case(source, store, FakeExecutor::ok(), SeqClock::new(1000, 1000));
+
+        let err = uc
+            .plan(PlanRequest {
+                instance: instance(),
+                runner_type: "tofu".into(),
+                command: vec!["plan".into()],
+                actor: Ident::parse("ci").unwrap(),
+                config_digest: Digest::of(b"cfg"),
+                ttl_seconds: 3600,
+                inputs: vec![InputRequest {
+                    alias: "platform".to_string(),
+                    producer: producer_instance(),
+                    expects: None,
+                    required: true,
+                }],
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::NotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn plan_skips_a_missing_optional_input_without_erroring() {
+        let (_tmp, source) = unit_source("variable \"x\" {}").await;
+        let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+        let uc = use_case(source, store, FakeExecutor::ok(), SeqClock::new(1000, 1000));
+
+        let plan = uc
+            .plan(PlanRequest {
+                instance: instance(),
+                runner_type: "tofu".into(),
+                command: vec!["plan".into()],
+                actor: Ident::parse("ci").unwrap(),
+                config_digest: Digest::of(b"cfg"),
+                ttl_seconds: 3600,
+                inputs: vec![InputRequest {
+                    alias: "platform".to_string(),
+                    producer: producer_instance(),
+                    expects: None,
+                    required: false,
+                }],
+            })
+            .await
+            .unwrap();
+        assert!(!plan.resolution.consumed_inputs.contains_key("platform"));
+    }
+
+    #[tokio::test]
+    async fn plan_fails_when_the_producers_schema_version_does_not_satisfy_expects() {
+        let (_tmp, source) = unit_source("variable \"x\" {}").await;
+        let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+        let published = OutputSet {
+            schema_version: semver::Version::parse("2.0.0").unwrap(),
+            values: BTreeMap::new(),
+            produced_by: RunId::new("run-producer".to_string()),
+            source_hash: Digest::of(b"producer"),
+            revision: Revision::from_raw(0),
+        };
+        store
+            .put_output_set(&producer_instance(), &published)
+            .await
+            .unwrap();
+
+        let uc = use_case(source, store, FakeExecutor::ok(), SeqClock::new(1000, 1000));
+        let err = uc
+            .plan(PlanRequest {
+                instance: instance(),
+                runner_type: "tofu".into(),
+                command: vec!["plan".into()],
+                actor: Ident::parse("ci").unwrap(),
+                config_digest: Digest::of(b"cfg"),
+                ttl_seconds: 3600,
+                inputs: vec![InputRequest {
+                    alias: "platform".to_string(),
+                    producer: producer_instance(),
+                    expects: Some(semver::VersionReq::parse("^1.0").unwrap()),
+                    required: true,
+                }],
+            })
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));

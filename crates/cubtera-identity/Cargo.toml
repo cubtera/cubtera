@@ -1,0 +1,16 @@
+[package]
+name = "cubtera-identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Cubtera v3 secret/identity resolution: cubtera_app::ports::IdentityProvider implementations. Resolves an OutputValue::Secret's opaque ref (\"env:VAR\", \"literal:...\") into its real value at execution time only."
+
+[dependencies]
+cubtera-app.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

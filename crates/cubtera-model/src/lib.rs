@@ -21,9 +21,11 @@ mod instance;
 mod lease;
 mod output_set;
 mod plan;
+mod policy;
 mod provenance;
 mod revision;
 mod run;
+mod state_projection;
 #[cfg(test)]
 mod test_support;
 mod unit_package;
@@ -37,11 +39,13 @@ pub use instance::Instance;
 pub use lease::Lease;
 pub use output_set::{OutputSet, OutputValue, SecretRef, StaleConsumer};
 pub use plan::{Plan, ResolutionManifest};
+pub use policy::{context_for, Effect, Policy, PolicyDecision, PolicyRule};
 pub use provenance::{
     field_provenance_for, gap_fill_merge_with_provenance, FieldProvenance, ProvenanceSource,
 };
 pub use revision::Revision;
 pub use run::{Run, RunFilter, RunOp, RunPatch, RunStatus};
+pub use state_projection::project_state_key;
 pub use unit_package::{PinnedModule, UnitPackage};
 
 pub type ModelResult<T> = Result<T, ModelError>;

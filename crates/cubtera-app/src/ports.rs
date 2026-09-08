@@ -108,6 +108,17 @@ pub struct ExecOutcome {
     pub outputs: Option<Value>,
 }
 
+/// Port: resolve an `OutputValue::Secret`'s opaque ref (e.g.
+/// `"env:VAR_NAME"`, `"vault://path#field"`) into its real value, at
+/// execution time only - never at display time (`OutputValue::redacted`
+/// covers that). `crates/cubtera-identity` provides the concrete
+/// implementations; `cubtera-app` never depends on a specific secret
+/// backend.
+#[async_trait]
+pub trait IdentityProvider: Send + Sync {
+    async fn resolve_secret(&self, secret_ref: &str) -> AppResult<Value>;
+}
+
 /// Port: actually run a unit's command. Implemented in `crates/cubtera` by
 /// bridging to `cubtera-exec`'s `RunnerStrategy`/`Workspace`/`ProcessRunner`
 /// - `cubtera-app` never depends on `cubtera-exec` directly, matching the

@@ -12,6 +12,7 @@ use cubtera_config::Config;
 use cubtera_core::error::AppError;
 use cubtera_domain::UnitStateKey;
 use cubtera_persistence::Repositories;
+use cubtera_store::Store as _;
 
 #[derive(Subcommand)]
 pub enum StateCommands {
@@ -33,11 +34,21 @@ pub enum StateCommands {
         extensions: Vec<String>,
     },
 
-    /// List every dims/ext combination a unit has ever published
+    /// List every dims/ext combination a unit has ever published, or (with
+    /// `--stale`) every consumer whose recorded `[inputs]` revision is
+    /// behind the producer's latest published revision - v3 state-mesh
+    /// (P6) visibility into `Store::mark_consumed`/`list_stale_consumers`,
+    /// independent of `unit`.
     Ls {
-        /// Producer unit name
-        #[arg(short, long)]
-        unit: String,
+        /// Producer unit name - ignored when `--stale` is set
+        #[arg(short, long, required_unless_present = "stale")]
+        unit: Option<String>,
+
+        /// List consumers that haven't re-applied since the producer they
+        /// depend on last published a newer output revision, across every
+        /// unit in `config.org` - not scoped to a single producer.
+        #[arg(long)]
+        stale: bool,
     },
 
     /// Remove a producer unit's published outputs for an exact dims/ext key
@@ -92,7 +103,30 @@ pub async fn run(
             }
         }
 
-        StateCommands::Ls { unit } => {
+        StateCommands::Ls { unit: _, stale } if stale => {
+            let org = cubtera_kernel::Ident::parse(&config.org)?;
+            let store = cubtera_store::SqliteStore::open(&config.store_path)?;
+            let stale_consumers = store.list_stale_consumers(&org).await?;
+
+            if ctx.json {
+                println!("{}", serde_json::to_string_pretty(&stale_consumers)?);
+            } else if stale_consumers.is_empty() {
+                println!("No stale consumers - every [inputs] consumer is up to date");
+            } else {
+                for entry in &stale_consumers {
+                    println!(
+                        "{}  consumes {} @ rev {} (latest: {})",
+                        entry.consumer.canonical(),
+                        entry.producer.canonical(),
+                        entry.consumed_revision,
+                        entry.current_revision,
+                    );
+                }
+            }
+        }
+
+        StateCommands::Ls { unit, .. } => {
+            let unit = unit.ok_or("--unit is required unless --stale is set")?;
             // `list` uses `org`/`unit` as raw SQL query parameters with no
             // further checks - validate here, same as `Get`/`Rm`'s
             // `UnitStateKey::try_new`.

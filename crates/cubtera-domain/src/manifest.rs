@@ -208,6 +208,13 @@ pub struct InputSpec {
     /// Missing producer state is a hard error when true. Defaults to `true`
     /// - a silently-empty input is rarely what a unit wants.
     pub required: Option<bool>,
+    /// A semver requirement (e.g. `"^1.0"`) the producer's
+    /// `OutputSet::schema_version` must satisfy (v3 state-mesh, P6) - a
+    /// mismatch is a hard `plan`/`apply` failure, never a silent stale
+    /// read. `None` skips the check entirely (v2 manifests, or a producer
+    /// that hasn't opted into schema versioning yet).
+    #[serde(default)]
+    pub expects: Option<String>,
 }
 
 impl InputSpec {
