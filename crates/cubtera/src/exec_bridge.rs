@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use cubtera_app::ports::{ExecCapabilities, ExecOutcome, ExecRequest, Executor};
 use cubtera_app::{AppError, AppResult};
 use cubtera_exec::{
-    BashRunner, ExecError, ProcessRunner, RunnerContext, RunnerStrategy, TfLikeRunner,
+    BashRunner, ExecError, HelmRunner, ProcessRunner, RunnerContext, RunnerStrategy, TfLikeRunner,
     TokioProcessRunner,
 };
 use serde_json::Value;
@@ -43,12 +43,8 @@ impl ExecutorBridge {
     }
 
     /// Resolve `runner_type` (the same strings `Manifest::runner_type().as_str()`
-    /// already produces: `"tf"`/`"tofu"`/`"bash"`) to a concrete
-    /// [`RunnerStrategy`]. `"helm"` is a deliberate, explicit gap: v2's
-    /// `HelmRunner` has no `cubtera-exec` equivalent yet (P4 scope only
-    /// covers tf-like + bash - see docs/specs/2026-09-03-cubtera-v3-architecture.md
-    /// §3), so a helm unit gets a clear validation error instead of
-    /// silently falling through to some default.
+    /// already produces: `"tf"`/`"tofu"`/`"bash"`/`"helm"`) to a concrete
+    /// [`RunnerStrategy`].
     fn strategy(&self, runner_type: &str) -> AppResult<Arc<dyn RunnerStrategy>> {
         match runner_type {
                 "tf" | "terraform" => Ok(Arc::new(TfLikeRunner::terraform(
@@ -56,8 +52,9 @@ impl ExecutorBridge {
             ))),
             "tofu" | "opentofu" => Ok(Arc::new(TfLikeRunner::opentofu())),
             "bash" | "sh" => Ok(Arc::new(BashRunner::new())),
+            "helm" => Ok(Arc::new(HelmRunner::new())),
             other => Err(AppError::validation(format!(
-                "runner type {other:?} has no cubtera-exec RunnerStrategy yet (P4 covers tf/tofu/bash only)"
+                "runner type {other:?} has no cubtera-exec RunnerStrategy (known types: tf, tofu, bash, helm)"
             ))),
         }
     }
@@ -105,6 +102,7 @@ impl Executor for ExecutorBridge {
         let strategy = self.strategy(&req.runner_type)?;
         let ctx = self.context(&req);
 
+        strategy.prepare(&ctx).await.map_err(exec_error)?;
         let binary = strategy.binary(&ctx).await.map_err(exec_error)?;
         let args = strategy.build_args(&ctx).map_err(exec_error)?;
         let env = cubtera_exec::merged_env(strategy.env_vars(&ctx), &ctx);

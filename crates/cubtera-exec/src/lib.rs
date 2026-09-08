@@ -13,6 +13,7 @@
 
 mod bash;
 mod error;
+mod helm;
 mod materialize;
 mod process;
 mod runner;
@@ -22,6 +23,7 @@ mod workspace;
 
 pub use bash::BashRunner;
 pub use error::{ExecError, ExecResult};
+pub use helm::HelmRunner;
 pub use materialize::{apply as apply_materialization_plan, clean as clean_temp_folder, read_file};
 pub use process::{
     CapturingProcessRunner, ProcessOutput, ProcessRunner, ProcessSpec, TokioCapturingProcessRunner,

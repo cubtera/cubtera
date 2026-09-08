@@ -13,6 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+handlebars.workspace = true
 reqwest.workspace = true
 zip.workspace = true
 semver.workspace = true

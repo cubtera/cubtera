@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use cubtera_app::ports::{ExecCapabilities, ExecOutcome, ExecRequest, Executor};
 use cubtera_app::{AppError, AppResult};
 use cubtera_exec::{
-    BashRunner, CapturingProcessRunner, ExecError, RunnerContext, RunnerStrategy, TfLikeRunner,
-    TokioCapturingProcessRunner,
+    BashRunner, CapturingProcessRunner, ExecError, HelmRunner, RunnerContext, RunnerStrategy,
+    TfLikeRunner, TokioCapturingProcessRunner,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -33,15 +33,15 @@ impl ServerExecutor {
         }
     }
 
-    /// Same runner-type dispatch as the CLI bridge - see its doc comment
-    /// for why `"helm"` is a deliberate gap.
+    /// Same runner-type dispatch as the CLI bridge.
     fn strategy(&self, runner_type: &str) -> AppResult<Arc<dyn RunnerStrategy>> {
         match runner_type {
             "tf" | "terraform" => Ok(Arc::new(TfLikeRunner::terraform(self.tf_cache_dir.clone()))),
             "tofu" | "opentofu" => Ok(Arc::new(TfLikeRunner::opentofu())),
             "bash" | "sh" => Ok(Arc::new(BashRunner::new())),
+            "helm" => Ok(Arc::new(HelmRunner::new())),
             other => Err(AppError::validation(format!(
-                "runner type {other:?} has no cubtera-exec RunnerStrategy yet (P4 covers tf/tofu/bash only)"
+                "runner type {other:?} has no cubtera-exec RunnerStrategy (known types: tf, tofu, bash, helm)"
             ))),
         }
     }
@@ -89,6 +89,7 @@ impl Executor for ServerExecutor {
         let strategy = self.strategy(&req.runner_type)?;
         let ctx = self.context(&req);
 
+        strategy.prepare(&ctx).await.map_err(exec_error)?;
         let binary = strategy.binary(&ctx).await.map_err(exec_error)?;
         let args = strategy.build_args(&ctx).map_err(exec_error)?;
         let env = cubtera_exec::merged_env(strategy.env_vars(&ctx), &ctx);

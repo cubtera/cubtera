@@ -77,6 +77,15 @@ pub trait RunnerStrategy: Send + Sync {
     /// a pinned version, or just look one up on `PATH`).
     async fn binary(&self, ctx: &RunnerContext) -> ExecResult<PathBuf>;
 
+    /// Transform already-materialized files in `ctx.workspace_root` before
+    /// `execute` runs (e.g. `HelmRunner` merging every `cubtera_*.json`
+    /// file into `values.yaml` from `values.yaml.tpl`). Default: no-op -
+    /// tf-like/bash units need nothing here, since their variables go
+    /// straight into `env_vars` from `ctx.variables` in memory.
+    async fn prepare(&self, _ctx: &RunnerContext) -> ExecResult<()> {
+        Ok(())
+    }
+
     /// Build the argument list for `ctx.command`.
     fn build_args(&self, ctx: &RunnerContext) -> ExecResult<Vec<String>>;
 
