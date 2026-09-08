@@ -1,0 +1,18 @@
+[package]
+name = "cubtera-source"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Cubtera v3 source repository port: GitSource (pinned by commit) and FsSource (content-hash snapshot, no history)."
+
+[dependencies]
+cubtera-kernel.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process", "fs", "rt", "macros"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
