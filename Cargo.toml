@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     # v3 crates (see docs/specs/2026-09-03-cubtera-v3-architecture.md)
     "crates/cubtera-kernel",
+    "crates/cubtera-model",
     # v2 crates - retired phase-by-phase as v3 crates replace them
     "crates/cubtera-domain",
     "crates/cubtera-core",
@@ -78,6 +79,7 @@ predicates = "3"
 
 # Internal crates
 cubtera-kernel = { path = "crates/cubtera-kernel" }
+cubtera-model = { path = "crates/cubtera-model" }
 cubtera-domain = { path = "crates/cubtera-domain" }
 cubtera-core = { path = "crates/cubtera-core" }
 cubtera-config = { path = "crates/cubtera-config" }

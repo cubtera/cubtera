@@ -1,0 +1,17 @@
+[package]
+name = "cubtera-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Cubtera v3 model: typed inventory graph, gap-fill with provenance, content-addressed UnitPackage. Zero I/O."
+
+[dependencies]
+cubtera-kernel.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+jsonschema.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

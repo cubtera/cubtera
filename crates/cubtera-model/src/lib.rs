@@ -1,0 +1,27 @@
+//! Cubtera v3 model: typed inventory graph, gap-fill with provenance, and
+//! content-addressed unit packages.
+//!
+//! Like `cubtera-kernel`, this crate is zero I/O and zero async - it is
+//! the pure-logic layer `cubtera-app` (P3) orchestrates through ports.
+//! Where v2's `cubtera-domain` mixed "one fixed `dimRelations` chain" with
+//! "gap-fill happens, but nobody can tell you *where a value came from*",
+//! this crate makes both of those first-class: [`DimGraph`] is a real
+//! graph of named, typed edges (not one hardcoded chain), and
+//! [`gap_fill_merge_with_provenance`] records which layer supplied each
+//! field it didn't get from the dimension's own data.
+//!
+//! See docs/specs/2026-09-03-cubtera-v3-architecture.md ยง5.
+
+mod dim_graph;
+mod error;
+mod provenance;
+mod unit_package;
+
+pub use dim_graph::{DimEdge, DimGraph, DimTypeDef, GraphError, SchemaSpec};
+pub use error::ModelError;
+pub use provenance::{
+    field_provenance_for, gap_fill_merge_with_provenance, FieldProvenance, ProvenanceSource,
+};
+pub use unit_package::{PinnedModule, UnitPackage};
+
+pub type ModelResult<T> = Result<T, ModelError>;
