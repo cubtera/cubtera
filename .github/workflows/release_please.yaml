@@ -108,7 +108,6 @@ jobs:
           name: cubtera
           path: |
             target/${{ matrix.target }}/release/cubtera
-            target/${{ matrix.target }}/release/cubtera-api
           retention-days: 1
 
   publish_docker:
@@ -158,23 +157,31 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Set API Docker tags
-        id: meta-api
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api
-          tags: |
-            latest
-            ${{ steps.get-tag.outputs.tag_name }}
+      # `cubtera-api` (v2's REST API binary) is gone as of P7 - its v3
+      # replacement is `cubtera-server` (`crates/cubtera-server`), which
+      # isn't built/uploaded as a release artifact yet. Publishing a
+      # `-server` Docker image (naming, which binary/Dockerfile, whether it
+      # ships in the same release cadence as the CLI) is a product decision
+      # this crate-deletion cleanup doesn't make for you - re-enable this
+      # block once that's decided, pointed at `cubtera-server` instead of
+      # the removed `cubtera-api`.
+      # - name: Set server Docker tags
+      #   id: meta-server
+      #   uses: docker/metadata-action@v5
+      #   with:
+      #     images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-server
+      #     tags: |
+      #       latest
+      #       ${{ steps.get-tag.outputs.tag_name }}
 
-      - name: Build and push API Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile.api
-          push: true
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
+      # - name: Build and push server Docker image
+      #   uses: docker/build-push-action@v6
+      #   with:
+      #     context: .
+      #     file: ./Dockerfile.server
+      #     push: true
+      #     tags: ${{ steps.meta-server.outputs.tags }}
+      #     labels: ${{ steps.meta-server.outputs.labels }}
 
       - name: Trigger Homebrew formula update
         run: |

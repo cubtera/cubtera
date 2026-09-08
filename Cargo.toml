@@ -11,14 +11,15 @@ members = [
     "crates/cubtera-identity",
     "crates/cubtera-inventory",
     "crates/cubtera-server",
-    # v2 crates - retired phase-by-phase as v3 crates replace them
-    "crates/cubtera-domain",
-    "crates/cubtera-core",
+    # v2 crates - retired phase-by-phase as v3 crates replace them.
+    # cubtera-domain/cubtera-core/cubtera-persistence/cubtera-runners/
+    # cubtera-api are gone (P7): nothing outside that cluster ever
+    # depended on them once `cubtera run`/`plan`/`apply`/`log`/`state`/`im`
+    # and the server routes were rewired onto cubtera-app/cubtera-exec/
+    # cubtera-inventory/cubtera-store. cubtera-config stays - it's the
+    # `config.toml` loader, still used by every v3 entry point.
     "crates/cubtera-config",
-    "crates/cubtera-persistence",
-    "crates/cubtera-runners",
     "crates/cubtera",
-    "crates/cubtera-api",
     "crates/cubtera-mcp",
 ]
 
@@ -89,8 +90,4 @@ cubtera-store = { path = "crates/cubtera-store" }
 cubtera-exec = { path = "crates/cubtera-exec" }
 cubtera-identity = { path = "crates/cubtera-identity" }
 cubtera-inventory = { path = "crates/cubtera-inventory" }
-cubtera-domain = { path = "crates/cubtera-domain" }
-cubtera-core = { path = "crates/cubtera-core" }
 cubtera-config = { path = "crates/cubtera-config" }
-cubtera-persistence = { path = "crates/cubtera-persistence" }
-cubtera-runners = { path = "crates/cubtera-runners" }

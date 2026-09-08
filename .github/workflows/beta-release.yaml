@@ -145,7 +145,6 @@ jobs:
           name: cubtera-beta-binaries
           path: |
             target/${{ matrix.target }}/release/cubtera
-            target/${{ matrix.target }}/release/cubtera-api
           retention-days: 7
 
   comment_pr:
