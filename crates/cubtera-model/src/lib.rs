@@ -13,6 +13,7 @@
 //! See docs/specs/2026-09-03-cubtera-v3-architecture.md ยง5.
 
 mod dim_graph;
+mod dimension;
 mod error;
 mod ids;
 mod instance;
@@ -27,6 +28,7 @@ mod test_support;
 mod unit_package;
 
 pub use dim_graph::{DimEdge, DimGraph, DimTypeDef, GraphError, SchemaSpec};
+pub use dimension::Dimension;
 pub use error::ModelError;
 pub use ids::{PlanId, RunId};
 pub use instance::Instance;

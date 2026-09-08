@@ -1,0 +1,19 @@
+[package]
+name = "cubtera-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Cubtera v3 application layer: use cases (resolve, validate, ...) and their ports. Depends only on cubtera-model/cubtera-kernel - all I/O lives behind a port, implemented by an adapter in a leaf crate."
+
+[dependencies]
+cubtera-kernel.workspace = true
+cubtera-model.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

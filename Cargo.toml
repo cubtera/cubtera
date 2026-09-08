@@ -4,6 +4,7 @@ members = [
     # v3 crates (see docs/specs/2026-09-03-cubtera-v3-architecture.md)
     "crates/cubtera-kernel",
     "crates/cubtera-model",
+    "crates/cubtera-app",
     "crates/cubtera-source",
     "crates/cubtera-store",
     # v2 crates - retired phase-by-phase as v3 crates replace them
@@ -53,10 +54,6 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Persistence adapters
-mongodb = "3.8.0"
-futures = "0.3"
-
 # Runners
 reqwest = { version = "0.13", default-features = false, features = [ "blocking", "json", "rustls" ] }
 zip = "8.6.0"
@@ -82,6 +79,7 @@ predicates = "3"
 # Internal crates
 cubtera-kernel = { path = "crates/cubtera-kernel" }
 cubtera-model = { path = "crates/cubtera-model" }
+cubtera-app = { path = "crates/cubtera-app" }
 cubtera-source = { path = "crates/cubtera-source" }
 cubtera-store = { path = "crates/cubtera-store" }
 cubtera-domain = { path = "crates/cubtera-domain" }

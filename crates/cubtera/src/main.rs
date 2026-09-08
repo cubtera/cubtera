@@ -2,6 +2,7 @@
 //!
 //! Multi-dimensional Infrastructure Manager
 
+mod app_bridge;
 mod commands;
 mod error;
 
@@ -48,6 +49,13 @@ enum Commands {
     /// Unit state (cross-unit outputs) commands
     #[command(subcommand)]
     State(commands::state::StateCommands),
+
+    /// Static fleet-wide validation: schemas + dim-graph edges (v3, P3)
+    Validate(commands::validate::ValidateArgs),
+
+    /// Fleet visibility commands (v3, P3) - `Binding`/selectors land in P5
+    #[command(subcommand)]
+    Fleet(commands::fleet::FleetCommands),
 }
 
 #[tokio::main]
@@ -94,6 +102,8 @@ async fn main() {
         Commands::Run(args) => commands::run::run(&config, args).await,
         Commands::Log(cmd) => commands::log::run(&config, &ctx, cmd).await,
         Commands::State(cmd) => commands::state::run(&config, &ctx, cmd).await,
+        Commands::Validate(args) => commands::validate::run(&config, &ctx, args).await,
+        Commands::Fleet(cmd) => commands::fleet::run(&config, &ctx, cmd).await,
     };
 
     if let Err(e) = result {
