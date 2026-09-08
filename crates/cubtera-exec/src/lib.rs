@@ -21,7 +21,10 @@ mod workspace;
 
 pub use bash::BashRunner;
 pub use error::{ExecError, ExecResult};
-pub use process::{ProcessOutput, ProcessRunner, ProcessSpec, TokioProcessRunner};
+pub use process::{
+    CapturingProcessRunner, ProcessOutput, ProcessRunner, ProcessSpec, TokioCapturingProcessRunner,
+    TokioProcessRunner,
+};
 pub use runner::{merged_env, RunnerCapabilities, RunnerContext, RunnerStrategy};
 pub use tf_like::TfLikeRunner;
 pub use version::{PathVersionResolver, TfSwitchResolver, VersionResolver};

@@ -397,6 +397,19 @@ impl RunUseCase {
             }
         }
 
+        // Best-effort: an `Executor` that captures stdio (`cubtera-server`,
+        // never the CLI - see `ExecOutcome::log_bytes`'s doc comment)
+        // hands back the run's combined output here; persist it
+        // content-addressed and point `Run::logs_ref` at the digest so
+        // `GET /v1/{org}/runs/{run_id}/log` can serve it later. A storage
+        // failure here must not turn an otherwise-successful run into a
+        // failed one.
+        if let Some(bytes) = &outcome.log_bytes {
+            if let Ok(digest) = self.store.put_artifact(bytes).await {
+                patch.logs_ref = Some(digest.to_hex());
+            }
+        }
+
         self.store.update_run(&run.id, patch.clone()).await?;
         patch.apply_to(&mut run);
 
@@ -624,6 +637,7 @@ mod tests {
                 } else {
                     None
                 },
+                log_bytes: None,
             })
         }
     }

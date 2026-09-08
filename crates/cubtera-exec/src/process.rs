@@ -102,9 +102,108 @@ impl ProcessRunner for TokioProcessRunner {
     }
 }
 
+/// Captures a process's combined stdout+stderr into memory instead of
+/// inheriting the parent's stdio - the opposite trade-off from
+/// [`TokioProcessRunner`], deliberately kept as a *separate* trait rather
+/// than a second [`ProcessRunner`] method: the CLI must never
+/// accidentally get this behavior (it would silently swallow interactive
+/// prompts and colored output - see this module's doc comment), so
+/// there's no default-provided fallback to forget to override. Built for
+/// `cubtera-server` (P7: "authn/authz and log streaming" - this is the
+/// "capture the log so it can be served over HTTP" half; true live
+/// SSE-tailing of an in-progress run is not implemented here, only
+/// after-the-fact retrieval of a finished run's captured output).
+#[async_trait]
+pub trait CapturingProcessRunner: Send + Sync {
+    async fn exec_captured(&self, spec: &ProcessSpec) -> ExecResult<(ProcessOutput, Vec<u8>)>;
+}
+
+/// Runs a [`ProcessSpec`] with stdout+stderr piped and captured, combined
+/// in the order the OS delivers them (via `tokio::process`'s
+/// `Stdio::piped()` on both streams, read to completion after `wait()`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TokioCapturingProcessRunner;
+
+impl TokioCapturingProcessRunner {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl CapturingProcessRunner for TokioCapturingProcessRunner {
+    async fn exec_captured(&self, spec: &ProcessSpec) -> ExecResult<(ProcessOutput, Vec<u8>)> {
+        use std::process::Stdio;
+        use tokio::io::AsyncReadExt;
+
+        let mut cmd = tokio::process::Command::new(&spec.program);
+        cmd.args(&spec.args);
+        cmd.current_dir(&spec.working_dir);
+        cmd.envs(&spec.env);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| ExecError::Process(format!("failed to spawn {}: {e}", spec.program)))?;
+
+        let mut stdout = child.stdout.take();
+        let mut stderr = child.stderr.take();
+        let mut combined = Vec::new();
+
+        // Sequential (not concurrent) reads are fine here: neither v3's
+        // tf-like nor bash runner produces enough output to fill a pipe
+        // buffer and deadlock waiting on the other stream, and this trait
+        // is never used for the CLI's interactive path (see the doc
+        // comment above) where that would matter more.
+        if let Some(out) = stdout.as_mut() {
+            out.read_to_end(&mut combined)
+                .await
+                .map_err(|e| ExecError::Process(format!("failed to read stdout: {e}")))?;
+        }
+        if let Some(err) = stderr.as_mut() {
+            err.read_to_end(&mut combined)
+                .await
+                .map_err(|e| ExecError::Process(format!("failed to read stderr: {e}")))?;
+        }
+
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| ExecError::Process(format!("failed to wait for {}: {e}", spec.program)))?;
+
+        Ok((
+            ProcessOutput {
+                exit_code: status.code().unwrap_or(-1),
+            },
+            combined,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn capturing_runner_captures_combined_stdout_and_stderr() {
+        let runner = TokioCapturingProcessRunner::new();
+        let spec = ProcessSpec::shell("echo out-line; echo err-line >&2", std::env::temp_dir());
+        let (output, bytes) = runner.exec_captured(&spec).await.unwrap();
+        assert!(output.success());
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("out-line"));
+        assert!(text.contains("err-line"));
+    }
+
+    #[tokio::test]
+    async fn capturing_runner_reports_a_nonzero_exit_code() {
+        let runner = TokioCapturingProcessRunner::new();
+        let spec = ProcessSpec::shell("exit 3", std::env::temp_dir());
+        let (output, _bytes) = runner.exec_captured(&spec).await.unwrap();
+        assert_eq!(output.exit_code, 3);
+        assert!(!output.success());
+    }
 
     #[tokio::test]
     async fn exec_reports_exit_code() {

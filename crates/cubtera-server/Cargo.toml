@@ -1,0 +1,43 @@
+[package]
+name = "cubtera-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Cubtera v3 HTTP API server: authn/authz + plan/apply/explain/state over cubtera-app, so unlike cubtera-api it can actually run units, not just read the inventory."
+
+[[bin]]
+name = "cubtera-server"
+path = "src/main.rs"
+
+[dependencies]
+cubtera-kernel.workspace = true
+cubtera-model.workspace = true
+cubtera-app.workspace = true
+cubtera-store.workspace = true
+cubtera-source.workspace = true
+cubtera-exec.workspace = true
+cubtera-identity.workspace = true
+cubtera-config.workspace = true
+
+# v2 crates, only for what P7 hasn't ported yet: reading manifest.toml /
+# materializing a unit's files onto disk (`cubtera_domain::Unit`,
+# `cubtera_core::services::{DimensionService, UnitService}`,
+# `cubtera_persistence::fs::FsWorkspace`) - the exact same seam
+# `crates/cubtera/src/commands/run_support.rs` already crosses for the
+# CLI's plan/apply/explain commands.
+cubtera-domain.workspace = true
+cubtera-core.workspace = true
+cubtera-persistence.workspace = true
+
+axum.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+semver.workspace = true

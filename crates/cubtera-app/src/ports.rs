@@ -106,6 +106,13 @@ pub struct ExecOutcome {
     /// `ExecRequest::collect_outputs` was set and the runner actually
     /// collected them.
     pub outputs: Option<Value>,
+    /// The run's captured combined stdout+stderr, if the `Executor`
+    /// implementation captures rather than inherits stdio (the CLI's
+    /// bridge never sets this - see
+    /// `cubtera_exec::process::CapturingProcessRunner`'s doc comment for
+    /// why that split is deliberate; `cubtera-server`'s bridge does, so
+    /// `RunUseCase::apply` can persist it as `Run::logs_ref`).
+    pub log_bytes: Option<Vec<u8>>,
 }
 
 /// Port: resolve an `OutputValue::Secret`'s opaque ref (e.g.

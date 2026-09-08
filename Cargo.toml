@@ -9,6 +9,7 @@ members = [
     "crates/cubtera-store",
     "crates/cubtera-exec",
     "crates/cubtera-identity",
+    "crates/cubtera-server",
     # v2 crates - retired phase-by-phase as v3 crates replace them
     "crates/cubtera-domain",
     "crates/cubtera-core",

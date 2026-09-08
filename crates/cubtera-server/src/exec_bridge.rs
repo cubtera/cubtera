@@ -1,59 +1,43 @@
 //! Bridges v3's `cubtera_app::ports::Executor` onto `cubtera-exec`'s
-//! `RunnerStrategy`/`ProcessRunner`/`Workspace`.
-//!
-//! Same rationale and shape as `app_bridge::InventoryPortBridge` (P3):
-//! `cubtera-app` cannot depend on `cubtera-exec` directly (see the crate
-//! table in docs/specs/2026-09-03-cubtera-v3-architecture.md §3), so this
-//! is the one place that actually owns a concrete `RunnerStrategy` and
-//! translates `RunUseCase`'s `ExecRequest`/`ExecOutcome` onto it.
-//!
-//! One `ExecutorBridge` is scoped to a single unit's materialized
-//! workspace (`workspace_root`) - `RunUseCase::plan`/`apply` always run
-//! against exactly one instance's temp folder per invocation, so there is
-//! no need for this bridge to be long-lived or shared across units.
+//! `RunnerStrategy`, capturing combined stdout+stderr instead of
+//! inheriting it - the opposite of `crates/cubtera/src/exec_bridge.rs`'s
+//! CLI bridge, and the reason this is a separate type rather than a
+//! shared one: the server has no TTY to inherit into, and capturing lets
+//! `GET /v1/{org}/runs/{run_id}/log` serve a finished run's output (see
+//! `cubtera_exec::process::CapturingProcessRunner`'s doc comment for why
+//! the CLI must never get this behavior instead).
 
 use async_trait::async_trait;
 use cubtera_app::ports::{ExecCapabilities, ExecOutcome, ExecRequest, Executor};
 use cubtera_app::{AppError, AppResult};
 use cubtera_exec::{
-    BashRunner, ExecError, ProcessRunner, RunnerContext, RunnerStrategy, TfLikeRunner,
-    TokioProcessRunner,
+    BashRunner, CapturingProcessRunner, ExecError, RunnerContext, RunnerStrategy, TfLikeRunner,
+    TokioCapturingProcessRunner,
 };
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Owns the real execution adapters for one run: which `RunnerStrategy` to
-/// dispatch to (by `runner_type`), where its workspace lives, and where a
-/// version-pinning strategy (`TfLikeRunner::terraform`) should cache
-/// downloaded binaries.
-pub struct ExecutorBridge {
+pub struct ServerExecutor {
     workspace_root: PathBuf,
     tf_cache_dir: PathBuf,
-    process: TokioProcessRunner,
+    process: TokioCapturingProcessRunner,
 }
 
-impl ExecutorBridge {
+impl ServerExecutor {
     pub fn new(workspace_root: PathBuf, tf_cache_dir: PathBuf) -> Self {
         Self {
             workspace_root,
             tf_cache_dir,
-            process: TokioProcessRunner::new(),
+            process: TokioCapturingProcessRunner::new(),
         }
     }
 
-    /// Resolve `runner_type` (the same strings `Manifest::runner_type().as_str()`
-    /// already produces: `"tf"`/`"tofu"`/`"bash"`) to a concrete
-    /// [`RunnerStrategy`]. `"helm"` is a deliberate, explicit gap: v2's
-    /// `HelmRunner` has no `cubtera-exec` equivalent yet (P4 scope only
-    /// covers tf-like + bash - see docs/specs/2026-09-03-cubtera-v3-architecture.md
-    /// §3), so a helm unit gets a clear validation error instead of
-    /// silently falling through to some default.
+    /// Same runner-type dispatch as the CLI bridge - see its doc comment
+    /// for why `"helm"` is a deliberate gap.
     fn strategy(&self, runner_type: &str) -> AppResult<Arc<dyn RunnerStrategy>> {
         match runner_type {
-                "tf" | "terraform" => Ok(Arc::new(TfLikeRunner::terraform(
-                self.tf_cache_dir.clone(),
-            ))),
+            "tf" | "terraform" => Ok(Arc::new(TfLikeRunner::terraform(self.tf_cache_dir.clone()))),
             "tofu" | "opentofu" => Ok(Arc::new(TfLikeRunner::opentofu())),
             "bash" | "sh" => Ok(Arc::new(BashRunner::new())),
             other => Err(AppError::validation(format!(
@@ -75,7 +59,7 @@ impl ExecutorBridge {
 }
 
 #[async_trait]
-impl Executor for ExecutorBridge {
+impl Executor for ServerExecutor {
     async fn capabilities(&self, runner_type: &str) -> AppResult<ExecCapabilities> {
         let caps = self.strategy(runner_type)?.capabilities();
         Ok(ExecCapabilities {
@@ -115,12 +99,23 @@ impl Executor for ExecutorBridge {
         )
         .with_args(args)
         .with_env(env);
-        let output = self.process.exec(&spec).await.map_err(exec_error)?;
+        let (output, log_bytes) = self
+            .process
+            .exec_captured(&spec)
+            .await
+            .map_err(exec_error)?;
 
         let mut outputs: Option<Value> = None;
         if output.success() && req.collect_outputs && strategy.capabilities().collects_outputs {
+            // `collect_outputs` shells out on its own (a fresh `<binary>
+            // output -json > cubtera_outputs.json` process, via
+            // `strategy.collect_outputs`'s own `ProcessRunner` - not
+            // `self.process`), so it isn't captured into `log_bytes`
+            // either; same as the CLI bridge, this is metadata collection,
+            // not part of the run's own output stream.
+            let inherited = cubtera_exec::TokioProcessRunner::new();
             strategy
-                .collect_outputs(&ctx, &self.process)
+                .collect_outputs(&ctx, &inherited)
                 .await
                 .map_err(exec_error)?;
             let raw_path = ctx.workspace_root.join("cubtera_outputs.json");
@@ -141,10 +136,7 @@ impl Executor for ExecutorBridge {
             success: output.success(),
             runner_version: binary.display().to_string(),
             outputs,
-            // The CLI always inherits stdio for interactive
-            // prompts/colored output - see `cubtera_exec::process`'s doc
-            // comment - so there is nothing to capture here.
-            log_bytes: None,
+            log_bytes: Some(log_bytes),
         })
     }
 }
