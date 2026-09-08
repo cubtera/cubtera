@@ -13,7 +13,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -22,36 +21,52 @@ fn repo_root() -> PathBuf {
         .unwrap()
 }
 
-/// A single SQLite store shared by every `cubtera` invocation in this test
-/// binary - mirrors the real deployment shape (one `~/.cubtera/store.sqlite`
-/// shared across every separate `cubtera` process invocation) but isolated
-/// from the developer's actual home directory. Deliberately *not* scoped to
-/// a per-test `temp_path`: `tf_unit_applies_and_creates_local_files` below
-/// publishes `tf_unit02`'s outputs from one `cubtera run` and consumes them
-/// from `bash_unit01`'s `cubtera run` under a *different* temp folder - only
-/// the store needs to be shared across those two calls, not the workspace.
-fn shared_store_path() -> &'static Path {
-    static STORE_PATH: OnceLock<PathBuf> = OnceLock::new();
-    STORE_PATH.get_or_init(|| {
-        tempfile::tempdir()
-            .unwrap()
-            .into_path()
-            .join("store.sqlite")
-    })
+/// A single SQLite store shared *only* by `tf_unit_applies_and_creates_local_files`'s
+/// own `cubtera` invocations - it publishes `tf_unit02`'s outputs from one
+/// `cubtera run` and consumes them from `bash_unit01`'s `cubtera run` under a
+/// *different* temp folder, so the store (not the workspace) needs to be
+/// shared across those two calls. Every other test gets its own store via
+/// [`fresh_store_path`]: `RunUseCase::apply_direct` takes a real mutual-
+/// exclusion lease per instance (unlike v2's `cubtera run`, which never
+/// locked anything beyond `init`'s TCP port), and several of these tests
+/// legitimately target the *same* `bash_unit01`/`dc:stg1-use2` instance -
+/// running them against a shared store would race on that lease under
+/// `cargo test`'s default parallelism.
+fn shared_store_path() -> PathBuf {
+    tempfile::tempdir()
+        .unwrap()
+        .into_path()
+        .join("store.sqlite")
+}
+
+/// A fresh, per-call SQLite store path - isolates a test's `cubtera`
+/// invocation(s) from every other test's lease/run-id bookkeeping. See
+/// [`shared_store_path`]'s doc comment for why this is the default.
+fn fresh_store_path() -> PathBuf {
+    shared_store_path()
 }
 
 /// A `cubtera` invocation rooted at the repo root, pointed at
-/// `example/config.toml`, sharing the given temp folder path with every
-/// other call built from the same `temp_path` - needed because `tf`/`tofu`
-/// require `init` to have already materialized the unit's temp folder
-/// before `apply`/`destroy` will run against it.
-fn cli(temp_path: &Path) -> Command {
+/// `example/config.toml`, sharing the given temp folder *and* store path
+/// with every other call built from the same arguments - needed because
+/// `tf`/`tofu` require `init` to have already materialized the unit's temp
+/// folder before `apply`/`destroy` will run against it, and because a
+/// producer/consumer pair (`tf_unit02`/`bash_unit01`) needs to publish to
+/// and read from the same store.
+fn cli_with_store(temp_path: &Path, store_path: &Path) -> Command {
     let mut cmd = Command::cargo_bin("cubtera").unwrap();
     cmd.current_dir(repo_root())
         .env("CUBTERA_TEMP_PATH", temp_path)
-        .env("CUBTERA_STORE_PATH", shared_store_path())
+        .env("CUBTERA_STORE_PATH", store_path)
         .args(["-c", "example/config.toml"]);
     cmd
+}
+
+/// [`cli_with_store`] with a fresh, single-use store - the right default
+/// for any test that doesn't itself need cross-invocation store state
+/// (i.e. every test except `tf_unit_applies_and_creates_local_files`).
+fn cli(temp_path: &Path) -> Command {
+    cli_with_store(temp_path, &fresh_store_path())
 }
 
 /// A fresh, per-test temp folder root - leaked deliberately (see `e2e.rs`):
@@ -197,13 +212,18 @@ fn bash_unit_resolves_optional_dimension_when_supplied() {
 #[test]
 fn tf_unit_applies_and_creates_local_files() {
     let temp_path = fresh_temp_dir();
+    // This test's `tf_unit02`/`bash_unit01` pair needs a store shared
+    // across their separate `cubtera run` invocations (see
+    // `shared_store_path`'s doc comment) - every `cli(...)` call below is
+    // `cli_with_store(_, &store_path)` for exactly that reason.
+    let store_path = shared_store_path();
 
-    cli(&temp_path)
+    cli_with_store(&temp_path, &store_path)
         .args(["run", "-u", "tf_unit02", "-d", "dc:stg1-use2", "--", "init"])
         .assert()
         .success();
 
-    let output = cli(&temp_path)
+    let output = cli_with_store(&temp_path, &store_path)
         .args([
             "run",
             "-u",
@@ -243,7 +263,7 @@ fn tf_unit_applies_and_creates_local_files() {
     // dimension. Run this against the same temp folder/apply (not a
     // separate concurrent `terraform apply`) to avoid racing another
     // terraform process on the shared provider plugin cache.
-    let bash_output = cli(&fresh_temp_dir())
+    let bash_output = cli_with_store(&fresh_temp_dir(), &store_path)
         .args([
             "run",
             "-u",
@@ -265,7 +285,7 @@ fn tf_unit_applies_and_creates_local_files() {
         "stdout: {bash_stdout}"
     );
 
-    cli(&temp_path)
+    cli_with_store(&temp_path, &store_path)
         .args([
             "run",
             "-u",

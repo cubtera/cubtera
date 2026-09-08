@@ -5,12 +5,8 @@
 //! seeding the store directly is a faithful test of the CLI plumbing.
 
 use assert_cmd::Command;
-use cubtera_core::ports::UnitStateRepository;
-use cubtera_domain::UnitStateRecord;
-use cubtera_persistence::sqlite::SqliteUnitStateRepository;
-use cubtera_store::SqliteStore;
+use cubtera_store::{LegacyUnitStateRow, SqliteStore};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -35,17 +31,19 @@ fn fresh_store_path() -> PathBuf {
 }
 
 async fn seed(store_path: &Path, unit: &str, dims: &[&str], outputs: serde_json::Value) {
-    let store = Arc::new(SqliteStore::open(store_path).unwrap());
-    let repo = SqliteUnitStateRepository::new(store);
-    let record = UnitStateRecord {
+    let store = SqliteStore::open(store_path).unwrap();
+    let dims: Vec<String> = dims.iter().map(|s| s.to_string()).collect();
+    let ext: Vec<String> = vec![];
+    let state_key = LegacyUnitStateRow::state_key("cubtera", unit, &dims, &ext);
+    let row = LegacyUnitStateRow {
         org: "cubtera".to_string(),
         unit: unit.to_string(),
-        dims: dims.iter().map(|s| s.to_string()).collect(),
-        ext: vec![],
+        dims,
+        ext,
         outputs,
         updated_at: 1_700_000_000,
     };
-    repo.put(&record).await.unwrap();
+    store.put_legacy_unit_state(state_key, row).await.unwrap();
 }
 
 #[test]

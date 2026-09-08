@@ -11,8 +11,6 @@ path = "src/main.rs"
 
 [dependencies]
 cubtera-kernel.workspace = true
-cubtera-domain.workspace = true
-cubtera-core.workspace = true
 cubtera-app.workspace = true
 cubtera-model.workspace = true
 cubtera-store.workspace = true
@@ -21,8 +19,6 @@ cubtera-exec.workspace = true
 cubtera-identity.workspace = true
 cubtera-inventory.workspace = true
 cubtera-config.workspace = true
-cubtera-persistence.workspace = true
-cubtera-runners.workspace = true
 
 clap.workspace = true
 tokio.workspace = true

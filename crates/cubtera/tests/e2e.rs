@@ -143,7 +143,7 @@ fn run_without_required_dimension_exits_validation_error() {
         .assert()
         .failure()
         .code(5)
-        .stderr(predicate::str::contains("Missing required dimensions"));
+        .stderr(predicate::str::contains("missing required dimensions"));
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn run_denied_by_allow_list_exits_access_denied() {
         .assert()
         .failure()
         .code(3)
-        .stderr(predicate::str::contains("Access denied"));
+        .stderr(predicate::str::contains("access denied"));
 }
 
 #[test]

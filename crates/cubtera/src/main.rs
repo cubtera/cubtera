@@ -114,7 +114,7 @@ async fn main() {
     let result = match cli.command {
         Commands::Config => commands::config::run(&config, &ctx),
         Commands::Im(cmd) => commands::im::run(&config, &ctx, cmd).await,
-        Commands::Run(args) => commands::run::run(&config, args).await,
+        Commands::Run(args) => commands::run::run(&config, &ctx, args).await,
         Commands::Log(cmd) => commands::log::run(&config, &ctx, cmd).await,
         Commands::State(cmd) => commands::state::run(&config, &ctx, cmd).await,
         Commands::Validate(args) => commands::validate::run(&config, &ctx, args).await,

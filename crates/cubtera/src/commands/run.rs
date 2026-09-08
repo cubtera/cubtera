@@ -1,15 +1,24 @@
-//! Run command
+//! `cubtera run` (v3, P7-retire-run) - the "just run it" escape hatch:
+//! resolve the unit and execute `command` directly through
+//! `RunUseCase::apply_direct` - no `Plan` artifact, no pin-drift gate.
+//! This is the v3-native replacement for v2's unconditional `run.rs`
+//! (`cubtera_core::App`/`cubtera_persistence::fs::FsWorkspace`/
+//! `cubtera_runners`) - no `cubtera-core`/`cubtera-domain`/
+//! `cubtera-persistence`/`cubtera-runners` dependency left in this module.
+//! Kept for backward-compatible CLI UX (`-u`/`-d`/`-e`/`--auto-approve`/
+//! `--dry-run`/`-- <command>`) and because bash/helm runners have no plan
+//! concept at all (`RunUseCase::plan` rejects them) - `cubtera plan` +
+//! `cubtera apply --plan` remain the additional, opt-in reviewed-plan
+//! workflow for tf/tofu units that want it.
 
+use super::run_support::{build_input_requests, build_unit, config_digest, default_actor, prepare};
+use super::Ctx;
 use clap::Args;
+use cubtera_app::ApplyRequest;
 use cubtera_config::Config;
-use cubtera_core::ports::CopyConfig;
-use cubtera_core::App;
-use cubtera_domain::{gap_fill_merge, render_state_backend_config, RunParams, Unit};
-use cubtera_persistence::fs::FsWorkspace;
-use cubtera_persistence::Repositories;
-use cubtera_runners::{DefaultRunnerFactory, TokioProcessRunner};
-use serde_json::{json, Value};
-use std::sync::Arc;
+use cubtera_kernel::Ident;
+use cubtera_model::RunStatus;
+use std::time::Duration;
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -34,186 +43,116 @@ pub struct RunArgs {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Who's running this. Defaults to `$USER`.
+    #[arg(long)]
+    pub actor: Option<String>,
+
+    /// How long to hold the mutual-exclusion lease on this instance while
+    /// running, in seconds.
+    #[arg(long, default_value = "300")]
+    pub lease_ttl_seconds: u64,
+
+    /// Schema version to tag this run's published `[outputs]` with, if the
+    /// manifest declares `[outputs] publish = true`.
+    #[arg(long, default_value = "1.0.0")]
+    pub outputs_schema_version: String,
+
     /// Command to run (after --)
     #[arg(last = true)]
     pub command: Vec<String>,
 }
 
-pub async fn run(config: &Config, args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let repos = Repositories::from_config(config).await?;
-    let mut runner_factory = DefaultRunnerFactory::new();
-    if let Some(v) = config.runner.get("tf").and_then(|m| m.get("version")) {
-        runner_factory = runner_factory.with_tf_version(v.clone());
-    }
-    if let Some(v) = config.runner.get("tofu").and_then(|m| m.get("version")) {
-        runner_factory = runner_factory.with_tofu_version(v.clone());
-    }
-    let runner_factory = Arc::new(runner_factory);
-
-    // Build CopyConfig from global config
-    let copy_config = CopyConfig {
-        modules_path: config.modules_path.clone(),
-        plugins_path: config.plugins_path.clone(),
-        always_copy_files: config.always_copy_files,
-        clean_cache: config.clean_cache,
-    };
-
-    let hierarchy = cubtera_persistence::Repositories::hierarchy(config);
-    let workspace = Arc::new(FsWorkspace::new());
-    let process = Arc::new(TokioProcessRunner::new());
-
-    let app = App::new(
-        repos.inventory,
-        hierarchy,
-        repos.units,
-        runner_factory,
-        workspace,
-        process,
-        copy_config.clone(),
-        Some(repos.deployment_log),
-        Some(repos.unit_state),
-    );
-
-    // Build unit
-    let mut unit = app
-        .units
-        .build_unit_with_extensions(&config.org, &args.unit, &args.dimensions, &args.extensions)
-        .await?;
-
-    // Calculate and set temp folder
-    let temp_folder = unit.calculate_temp_folder(&config.temp_folder_path);
-    unit = unit.with_temp_folder(temp_folder);
-
+pub async fn run(
+    config: &Config,
+    ctx: &Ctx,
+    args: RunArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
     if args.dry_run {
-        if !unit.resolved_inputs.is_empty() {
-            println!("Resolved inputs:");
-            println!("{}", serde_json::to_string_pretty(&unit.resolved_inputs)?);
-            println!();
-        }
-        let plan = unit.materialize(&copy_config.modules_path, None)?;
+        let unit = build_unit(config, &args.unit, &args.dimensions, &args.extensions).await?;
+        let plan = unit.materialize(&config.modules_path, None)?;
         println!("{plan}");
         return Ok(());
     }
 
-    println!("Running unit: {}", unit.name);
+    if args.command.is_empty() {
+        return Err(
+            "cubtera run requires a command after `--` (e.g. `cubtera run -u X -d ... -- apply`)"
+                .into(),
+        );
+    }
+
+    let prepared = prepare(config, &args.unit, &args.dimensions, &args.extensions).await?;
+    let runner_type = prepared.unit.manifest.runner_type().as_str().to_string();
+    let publish_outputs = prepared
+        .unit
+        .manifest
+        .outputs
+        .as_ref()
+        .map(|o| o.publish)
+        .unwrap_or(false);
+    let actor = args.actor.clone().unwrap_or_else(default_actor);
+    let outputs_schema_version =
+        semver::Version::parse(&args.outputs_schema_version).map_err(|e| {
+            format!(
+                "invalid --outputs-schema-version {:?}: {e}",
+                args.outputs_schema_version
+            )
+        })?;
+    let inputs = build_input_requests(config, &prepared.unit).await?;
+
+    println!("Running unit: {}", prepared.unit.name);
     println!(
         "Dimensions: {:?}",
-        unit.dimensions.iter().map(|d| d.key()).collect::<Vec<_>>()
+        prepared
+            .unit
+            .dimensions
+            .iter()
+            .map(|d| d.key())
+            .collect::<Vec<_>>()
     );
     println!("Command: {:?}", args.command);
-    println!("Temp folder: {}", unit.temp_folder.display());
+    println!("Temp folder: {}", prepared.unit.temp_folder.display());
     println!();
 
-    // Build params from CLI flags + manifest `[runner]`/`[state]` overrides,
-    // merged with the org's `[state.<backend>]` template and rendered.
-    let params = build_run_params(config, &unit, &args)?;
+    let run_record = prepared
+        .use_case
+        .apply_direct(
+            prepared.instance.clone(),
+            ApplyRequest {
+                runner_type,
+                command: args.command.clone(),
+                auto_approve: args.auto_approve,
+                actor: Ident::parse(&actor)?,
+                config_digest: config_digest(config)?,
+                publish_outputs,
+                outputs_schema_version,
+                lease_ttl: Duration::from_secs(args.lease_ttl_seconds),
+                inputs,
+            },
+        )
+        .await?;
 
-    // Execute
-    let result = app.runners.run(&unit, args.command, Some(params)).await?;
-
-    // Output results
-    if let Some(output) = &result.output {
-        print!("{}", output);
-    }
-
-    let exit_code = result.exit_code.unwrap_or(0);
-
-    if result.is_success() {
-        println!("\nCompleted successfully");
-        Ok(())
+    if ctx.json {
+        println!("{}", serde_json::to_string_pretty(&run_record)?);
     } else {
-        eprintln!("\nFailed with exit code {}", exit_code);
-        std::process::exit(exit_code);
-    }
-}
-
-/// Build [`RunParams`] for `unit`: the raw command plus everything sourced
-/// from `manifest.runner`/`manifest.state` (inlet/outlet commands, version,
-/// custom binary, extra args) and the rendered state backend config (manifest
-/// overrides gap-filled from the org's `[state.<backend>]` template, then
-/// handlebars-rendered against `{org, unit_name, dim_tree}`).
-fn build_run_params(
-    config: &Config,
-    unit: &Unit,
-    args: &RunArgs,
-) -> Result<RunParams, Box<dyn std::error::Error>> {
-    let mut params = RunParams::new(&unit.temp_folder)
-        .with_commands(args.command.clone())
-        .with_auto_approve(args.auto_approve);
-
-    // Global `[runner.<type>]` gap-filled by the manifest's own `[runner]`
-    // overrides (manifest wins) - same precedence as the state backend below.
-    let runner_type = unit.manifest.runner_type().as_str().to_string();
-    let mut runner_cfg = config.runner.get(&runner_type).cloned().unwrap_or_default();
-    if let Some(overrides) = &unit.manifest.runner {
-        runner_cfg.extend(overrides.clone());
-    }
-
-    if !runner_cfg.is_empty() {
-        if let Some(v) = runner_cfg.get("version") {
-            params = params.with_version(v.clone());
+        println!("Run:          {}", run_record.id);
+        println!("Status:       {:?}", run_record.status);
+        println!("Exit code:    {}", run_record.exit_code.unwrap_or(-1));
+        if let Some(revision) = run_record.produced_outputs_revision {
+            println!("Outputs rev:  {revision}");
         }
-        if let Some(v) = runner_cfg.get("runner_command") {
-            params = params.with_runner_command(v.clone());
-        }
-        if let Some(v) = runner_cfg
-            .get("extra_args")
-            .or_else(|| runner_cfg.get("extra_params"))
-        {
-            params = params.with_extra_args(v.clone());
-        }
-        if let Some(v) = runner_cfg.get("inlet_command") {
-            params = params.with_inlet_command(v.clone());
-        }
-        if let Some(v) = runner_cfg.get("outlet_command") {
-            params = params.with_outlet_command(v.clone());
+        match run_record.status {
+            RunStatus::Succeeded => println!("\nCompleted successfully"),
+            _ => eprintln!(
+                "\nFailed with exit code {}",
+                run_record.exit_code.unwrap_or(1)
+            ),
         }
     }
 
-    // Manifest's own `[state]` table wins; else fall back to the org's
-    // `[runner.<type>]` default (e.g. `state_backend = "s3"` for `tf`).
-    let backend_name = unit
-        .manifest
-        .state_backend()
-        .or_else(|| runner_cfg.get("state_backend").map(|s| s.as_str()));
-
-    if let Some(backend_name) = backend_name {
-        let template = config
-            .state
-            .get(backend_name)
-            .map(|c| Value::Object(c.options.clone().into_iter().collect()))
-            .unwrap_or_else(|| json!({}));
-
-        let mut data = unit
-            .manifest
-            .state
-            .as_ref()
-            .map(|overrides| {
-                Value::Object(
-                    overrides
-                        .iter()
-                        .map(|(k, v)| (k.clone(), Value::String(v.clone())))
-                        .collect(),
-                )
-            })
-            .unwrap_or_else(|| json!({}));
-        gap_fill_merge(&mut data, &template);
-
-        let context = json!({
-            "org": config.org,
-            "unit_name": unit.name,
-            "dim_tree": unit.dim_tree(),
-        });
-        let rendered = render_state_backend_config(&data, &context)?;
-
-        // `TerraformRunner::extend_plan` expects the backend name wrapped
-        // around its options (`{"local": {"path": ...}}`), matching the HCL
-        // shape `backend "local" { path = ... }` - not the flat options
-        // object alone.
-        params = params
-            .with_state_backend(backend_name)
-            .with_state_backend_config(json!({ backend_name: rendered }));
+    if run_record.status != RunStatus::Succeeded {
+        std::process::exit(run_record.exit_code.unwrap_or(1));
     }
 
-    Ok(params)
+    Ok(())
 }

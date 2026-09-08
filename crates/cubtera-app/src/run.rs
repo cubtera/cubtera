@@ -186,6 +186,31 @@ impl RunUseCase {
         Ok((resolution, variables))
     }
 
+    /// Resolve every `[inputs.<alias>]` entry in `inputs` to its producer's
+    /// current output values (alias -> flat `{name: value}` object,
+    /// secrets already resolved) - what `cubtera_model::Unit::
+    /// with_resolved_inputs` needs to materialize `cubtera_in_<alias>.json`/
+    /// `cubtera_inputs.json` to disk *before* a real run, so a bash/helm
+    /// unit sees the same cross-unit state on disk as it does via
+    /// `CUBTERA_IN_<ALIAS>`/`TF_VAR_<alias>` env vars from
+    /// [`Self::build_resolution`]. Applies the exact same required/
+    /// optional/schema semantics as [`Self::resolve_input`] (a missing
+    /// required producer is a hard [`AppError::NotFound`]) - callers that
+    /// only want a best-effort preview (e.g. `cubtera run --dry-run`,
+    /// which has no [`ApplyRequest`] yet) should not call this.
+    pub async fn resolve_inputs_for_materialization(
+        &self,
+        inputs: &[InputRequest],
+    ) -> AppResult<BTreeMap<String, Value>> {
+        let mut resolved = BTreeMap::new();
+        for input in inputs {
+            if let Some((value, _revision)) = self.resolve_input(input).await? {
+                resolved.insert(input.alias.clone(), value);
+            }
+        }
+        Ok(resolved)
+    }
+
     /// Fetch and validate one `[inputs.<alias>]` entry: missing +
     /// `required` is a hard [`AppError::NotFound`]; missing + optional is
     /// `Ok(None)` (skipped, not defaulted to anything); a `schema_version`
@@ -230,11 +255,26 @@ impl RunUseCase {
         Ok(Some((Value::Object(resolved), set.revision)))
     }
 
+    /// Mint a `RunId`/`PlanId`: a digest of `instance`/`salt`/`now`, plus
+    /// this process's pid and a per-process monotonic counter as tie
+    /// -breakers. `now` alone is only millisecond-resolution - two
+    /// `cubtera run`s against the *same* instance (a real scenario: e.g.
+    /// several short-lived CLI invocations racing a shared `cubtera-store`
+    /// in tests, or two operators applying the same unit within the same
+    /// millisecond) would otherwise mint the exact same id and collide on
+    /// `Store::append_run`'s `runs.run_id` uniqueness constraint - this is
+    /// an identifier, not a content-addressed pin, so it doesn't need to
+    /// be reproducible across processes the way `Digest::of_parts` is used
+    /// elsewhere in this file.
     fn mint_id(&self, instance: &InstanceId, salt: &str, now: i64) -> String {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Digest::of_parts([
             instance.canonical().into_bytes(),
             salt.as_bytes().to_vec(),
             now.to_le_bytes().to_vec(),
+            std::process::id().to_le_bytes().to_vec(),
+            seq.to_le_bytes().to_vec(),
         ])
         .to_hex()
     }
@@ -337,18 +377,65 @@ impl RunUseCase {
             )));
         }
 
+        self.execute_and_record(
+            plan.instance.clone(),
+            Some(plan_id.clone()),
+            current,
+            variables,
+            &req,
+            now,
+        )
+        .await
+    }
+
+    /// `cubtera run`: resolve, execute, and record a [`Run`] directly,
+    /// with no [`Plan`] artifact and no pin-drift check. This is the v3
+    /// replacement for v2's unconditional "just run it" `cubtera run` -
+    /// `apply()`'s reviewed-plan gate (§7 of the architecture spec) is an
+    /// *additional*, opt-in workflow (`cubtera plan` + `cubtera apply
+    /// --plan`), not the only way to execute a unit. In particular this is
+    /// the only path available for runners that don't support plan
+    /// artifacts at all (bash/helm - `plan()` rejects those with
+    /// [`AppError::Validation`]), so `cubtera run` must never be
+    /// implemented as an unconditional `plan()` + `apply()` pair.
+    pub async fn apply_direct(&self, instance: InstanceId, req: ApplyRequest) -> AppResult<Run> {
+        let now = self.clock.now_unix_ms();
+        let (mut current, variables) = self
+            .build_resolution(&instance, req.config_digest, &req.inputs)
+            .await?;
+        current.runner_version = self
+            .executor
+            .resolve_runner_version(&req.runner_type, None)
+            .await?;
+        self.execute_and_record(instance, None, current, variables, &req, now)
+            .await
+    }
+
+    /// Shared tail of [`Self::apply`]/[`Self::apply_direct`]: record a
+    /// queued [`Run`], take a lease, execute, and persist the outcome
+    /// (status/exit code/published outputs/logs/instance bookkeeping/
+    /// consumed-input tracking) - everything downstream of "we have an
+    /// agreed-upon `ResolutionManifest` and variables to run with",
+    /// regardless of whether that agreement came from a stored [`Plan`]
+    /// or was computed fresh for this call.
+    async fn execute_and_record(
+        &self,
+        instance: InstanceId,
+        plan_ref: Option<PlanId>,
+        current: ResolutionManifest,
+        variables: BTreeMap<String, Value>,
+        req: &ApplyRequest,
+        now: i64,
+    ) -> AppResult<Run> {
         let op = run_op_for(&req.command);
         let run = Run::queued(
-            RunId::new(self.mint_id(&plan.instance, "run", now)),
-            plan.instance.clone(),
+            RunId::new(self.mint_id(&instance, "run", now)),
+            instance.clone(),
             op.clone(),
             req.actor.clone(),
             now,
         );
-        let mut run = Run {
-            plan_ref: Some(plan_id.clone()),
-            ..run
-        };
+        let mut run = Run { plan_ref, ..run };
         self.store.append_run(&run).await?;
 
         let caps = self.executor.capabilities(&req.runner_type).await?;
@@ -356,12 +443,12 @@ impl RunUseCase {
 
         let lease = self
             .store
-            .acquire_lease(&plan.instance, req.actor.as_str(), req.lease_ttl)
+            .acquire_lease(&instance, req.actor.as_str(), req.lease_ttl)
             .await?;
         let exec_result = self
             .executor
             .execute(ExecRequest {
-                instance: plan.instance.clone(),
+                instance: instance.clone(),
                 runner_type: req.runner_type.clone(),
                 command: req.command.clone(),
                 auto_approve: req.auto_approve,
@@ -389,7 +476,7 @@ impl RunUseCase {
         if outcome.success && want_outputs {
             if let Some(raw) = &outcome.outputs {
                 if let Some(revision) = self
-                    .publish_outputs(&plan.instance, raw, &run.id, current.package_digest, &req)
+                    .publish_outputs(&instance, raw, &run.id, current.package_digest, req)
                     .await?
                 {
                     patch.produced_outputs_revision = Some(revision);
@@ -417,7 +504,7 @@ impl RunUseCase {
         // matching v2's "publish is best-effort" policy for the analogous
         // step (`RunService`'s `[outputs]` publish).
         let _ = self
-            .update_instance_after_run(&plan.instance, current.package_digest, &run)
+            .update_instance_after_run(&instance, current.package_digest, &run)
             .await;
 
         // Record every input this run actually consumed - best-effort,
@@ -429,7 +516,7 @@ impl RunUseCase {
                 if let Some(revision) = current.consumed_inputs.get(&input.alias) {
                     let _ = self
                         .store
-                        .mark_consumed(&plan.instance, &input.producer, *revision)
+                        .mark_consumed(&instance, &input.producer, *revision)
                         .await;
                 }
             }
@@ -621,6 +708,13 @@ mod tests {
                 collects_outputs: true,
                 fail: false,
                 outputs: Some(serde_json::json!({"vpc_id": "vpc-1"})),
+            }
+        }
+
+        fn failing() -> Self {
+            Self {
+                fail: true,
+                ..Self::ok()
             }
         }
     }
@@ -819,6 +913,76 @@ mod tests {
         let explained = uc.explain(&run.id).await.unwrap();
         assert_eq!(explained.id, run.id);
         assert_eq!(explained.status, RunStatus::Succeeded);
+    }
+
+    #[tokio::test]
+    async fn apply_direct_runs_without_a_plan_even_for_a_runner_with_no_plan_capability() {
+        let (_tmp, source) = unit_source("echo hi").await;
+        let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+        let mut executor = FakeExecutor::ok();
+        executor.supports_plan_artifact = false; // bash-shaped runner
+        let uc = use_case(source, store.clone(), executor, SeqClock::new(1000, 1000));
+
+        let run = uc
+            .apply_direct(
+                instance(),
+                ApplyRequest {
+                    runner_type: "bash".into(),
+                    command: vec!["apply".into()],
+                    auto_approve: true,
+                    actor: Ident::parse("ci").unwrap(),
+                    config_digest: Digest::of(b"cfg"),
+                    publish_outputs: true,
+                    outputs_schema_version: semver::Version::parse("1.0.0").unwrap(),
+                    lease_ttl: Duration::from_secs(60),
+                    inputs: vec![],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(run.status, RunStatus::Succeeded);
+        assert_eq!(run.exit_code, Some(0));
+        assert_eq!(run.plan_ref, None);
+        // Outputs still get collected/published - `apply_direct` skips the
+        // plan/pin-check gate, not the rest of `apply`'s bookkeeping.
+        assert_eq!(run.produced_outputs_revision, Some(Revision::from_raw(1)));
+
+        let stored_instance = store.get_instance(&instance()).await.unwrap().unwrap();
+        assert_eq!(stored_instance.last_run, Some(run.id.clone()));
+    }
+
+    #[tokio::test]
+    async fn apply_direct_records_a_failed_run_on_nonzero_exit_without_erroring() {
+        let (_tmp, source) = unit_source("variable \"x\" {}").await;
+        let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+        let uc = use_case(
+            source,
+            store,
+            FakeExecutor::failing(),
+            SeqClock::new(1000, 1000),
+        );
+
+        let run = uc
+            .apply_direct(
+                instance(),
+                ApplyRequest {
+                    runner_type: "tofu".into(),
+                    command: vec!["apply".into()],
+                    auto_approve: true,
+                    actor: Ident::parse("ci").unwrap(),
+                    config_digest: Digest::of(b"cfg"),
+                    publish_outputs: false,
+                    outputs_schema_version: semver::Version::parse("1.0.0").unwrap(),
+                    lease_ttl: Duration::from_secs(60),
+                    inputs: vec![],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(run.status, RunStatus::Failed);
+        assert_ne!(run.exit_code, Some(0));
     }
 
     #[tokio::test]

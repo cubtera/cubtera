@@ -165,27 +165,46 @@ pub fn build_binding_use_case(
     ))
 }
 
-/// Resolve `unit_name`/`dimensions`/`extensions` through `AssembleUseCase`,
-/// materialize the unit's files onto disk (`cubtera_exec::apply_materialization_plan`,
-/// the v3-native equivalent of v2's `FsWorkspace::apply`), and wire a
-/// `RunUseCase` against the real inventory/source/store/executor adapters,
-/// scoped to this unit's materialized workspace.
+/// Resolve `unit_name`/`dimensions`/`extensions` through `AssembleUseCase`
+/// (dimension resolution + `AccessPolicy` + includes) and assign its temp
+/// folder - everything `plan`/`apply`/`explain`/`run --dry-run` need
+/// *before* deciding whether to actually touch disk. Split out from
+/// [`prepare`] so `cubtera run --dry-run` can print the
+/// [`cubtera_model::MaterializationPlan`] without ever calling
+/// [`cubtera_exec::apply_materialization_plan`] - the same "resolve first,
+/// materialize only if not dry-run" split v2's `run.rs` had.
+pub async fn build_unit(
+    config: &Config,
+    unit_name: &str,
+    dimensions: &[String],
+    extensions: &[String],
+) -> Result<Unit, Box<dyn std::error::Error>> {
+    let assemble = AssembleUseCase::new(inventory_port(config), unit_port(config));
+
+    let unit = assemble
+        .build_unit_with_extensions(&config.org, unit_name, dimensions, extensions)
+        .await?;
+    let temp_folder = unit.calculate_temp_folder(&config.temp_folder_path);
+    Ok(unit.with_temp_folder(temp_folder))
+}
+
+/// [`build_unit`], then resolve any `[inputs.<alias>]` the unit declares
+/// against `cubtera-store` (so `cubtera_in_<alias>.json`/
+/// `cubtera_inputs.json` land on disk - the same file-based shape v2's
+/// consumers relied on, in addition to the `CUBTERA_IN_<ALIAS>`/
+/// `TF_VAR_<alias>` env vars `RunUseCase::build_resolution` injects at
+/// execute time), materialize the unit's files onto disk
+/// (`cubtera_exec::apply_materialization_plan`, the v3-native equivalent
+/// of v2's `FsWorkspace::apply`), and wire a `RunUseCase` against the real
+/// inventory/source/store/executor adapters, scoped to this unit's
+/// materialized workspace.
 pub async fn prepare(
     config: &Config,
     unit_name: &str,
     dimensions: &[String],
     extensions: &[String],
 ) -> Result<PreparedRun, Box<dyn std::error::Error>> {
-    let assemble = AssembleUseCase::new(inventory_port(config), unit_port(config));
-
-    let mut unit = assemble
-        .build_unit_with_extensions(&config.org, unit_name, dimensions, extensions)
-        .await?;
-    let temp_folder = unit.calculate_temp_folder(&config.temp_folder_path);
-    unit = unit.with_temp_folder(temp_folder);
-
-    let plan = unit.materialize(&config.modules_path, None)?;
-    cubtera_exec::apply_materialization_plan(&plan).await?;
+    let mut unit = build_unit(config, unit_name, dimensions, extensions).await?;
 
     let mut dim_refs = Vec::new();
     for dim in &unit.dimensions {
@@ -203,6 +222,15 @@ pub async fn prepare(
     )?;
 
     let use_case = build_use_case(config, unit.temp_folder.clone())?;
+
+    let inputs = build_input_requests(config, &unit).await?;
+    if !inputs.is_empty() {
+        let resolved_inputs = use_case.resolve_inputs_for_materialization(&inputs).await?;
+        unit = unit.with_resolved_inputs(resolved_inputs);
+    }
+
+    let plan = unit.materialize(&config.modules_path, None)?;
+    cubtera_exec::apply_materialization_plan(&plan).await?;
 
     Ok(PreparedRun {
         unit,

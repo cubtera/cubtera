@@ -155,9 +155,6 @@ pub async fn prepare(
     let temp_folder = unit.calculate_temp_folder(&config.temp_folder_path);
     unit = unit.with_temp_folder(temp_folder);
 
-    let plan = unit.materialize(&config.modules_path, None)?;
-    cubtera_exec::apply_materialization_plan(&plan).await?;
-
     let mut dim_refs: Vec<DimRef> = Vec::new();
     for dim in &unit.dimensions {
         dim_refs.push(dim.clone());
@@ -174,6 +171,19 @@ pub async fn prepare(
     )?;
 
     let use_case = build_use_case(config, unit.temp_folder.clone())?;
+
+    // Resolve `[inputs.<alias>]` against `cubtera-store` before
+    // materializing, so `cubtera_in_<alias>.json`/`cubtera_inputs.json`
+    // land on disk (the file-based shape v2's consumers relied on) - see
+    // the CLI's `run_support::prepare` doc comment for the rationale.
+    let inputs = build_input_requests(config, org, &unit).await?;
+    if !inputs.is_empty() {
+        let resolved_inputs = use_case.resolve_inputs_for_materialization(&inputs).await?;
+        unit = unit.with_resolved_inputs(resolved_inputs);
+    }
+
+    let plan = unit.materialize(&config.modules_path, None)?;
+    cubtera_exec::apply_materialization_plan(&plan).await?;
 
     Ok(PreparedRun {
         unit,
