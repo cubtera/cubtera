@@ -30,6 +30,12 @@ pub enum AppError {
     /// The port adapter behind an `InventoryPort` (FS, SQLite, ...) failed.
     #[error("backend error: {0}")]
     Backend(String),
+
+    /// `AssembleUseCase` denied a unit run per its `allowList`/`denyList`/
+    /// `affinityTags` (`cubtera_model::AccessPolicy::evaluate`) - a real,
+    /// non-zero outcome (CLI exit code 3), never a silent `exit(0)`.
+    #[error("access denied: {0}")]
+    AccessDenied(String),
 }
 
 impl From<cubtera_store::StoreError> for AppError {
@@ -64,5 +70,9 @@ impl AppError {
 
     pub fn backend(msg: impl Into<String>) -> Self {
         Self::Backend(msg.into())
+    }
+
+    pub fn access_denied(msg: impl Into<String>) -> Self {
+        Self::AccessDenied(msg.into())
     }
 }

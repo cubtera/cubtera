@@ -47,6 +47,7 @@ pub fn exit_code_for(err: &(dyn std::error::Error + 'static)) -> i32 {
 /// cannot depend on `cubtera-core`) with the same shape.
 fn exit_code_for_v3_app_error(err: &V3AppError) -> i32 {
     match err {
+        V3AppError::AccessDenied(_) => EXIT_ACCESS_DENIED,
         V3AppError::NotFound { .. } => EXIT_NOT_FOUND,
         V3AppError::Validation(_) | V3AppError::Model(_) => EXIT_VALIDATION,
         V3AppError::Backend(_) => EXIT_GENERAL_ERROR,

@@ -25,6 +25,7 @@
 //! "hash this unit's files right now" computation `plan`/`apply` already
 //! agree on) rather than inventing a second one.
 
+pub mod assemble;
 pub mod bindings;
 pub mod dim_graph_loader;
 pub mod error;
@@ -33,10 +34,11 @@ pub mod resolve;
 pub mod run;
 pub mod validate;
 
+pub use assemble::AssembleUseCase;
 pub use bindings::{group_by_wave, BindingUseCase, DriftState, InstanceDrift};
 pub use dim_graph_loader::load_dim_graph;
 pub use error::{AppError, AppResult};
-pub use ports::{Clock, IdentityProvider, InventoryPort, SystemClock};
+pub use ports::{Clock, IdentityProvider, InventoryPort, SystemClock, UnitPort};
 pub use resolve::ResolveUseCase;
 pub use run::{ApplyRequest, InputRequest, PlanRequest, RunUseCase};
 pub use validate::{DimensionValidation, FleetValidation, ValidateUseCase};

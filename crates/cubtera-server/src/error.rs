@@ -28,6 +28,7 @@ impl From<cubtera_app::AppError> for ApiError {
             E::Validation(_) => (StatusCode::BAD_REQUEST, "validation"),
             E::Model(_) => (StatusCode::BAD_REQUEST, "model"),
             E::Backend(_) => (StatusCode::INTERNAL_SERVER_ERROR, "backend"),
+            E::AccessDenied(_) => (StatusCode::FORBIDDEN, "access-denied"),
         };
         Self {
             status,

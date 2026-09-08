@@ -13,6 +13,7 @@
 
 mod bash;
 mod error;
+mod materialize;
 mod process;
 mod runner;
 mod tf_like;
@@ -21,6 +22,7 @@ mod workspace;
 
 pub use bash::BashRunner;
 pub use error::{ExecError, ExecResult};
+pub use materialize::{apply as apply_materialization_plan, clean as clean_temp_folder, read_file};
 pub use process::{
     CapturingProcessRunner, ProcessOutput, ProcessRunner, ProcessSpec, TokioCapturingProcessRunner,
     TokioProcessRunner,
