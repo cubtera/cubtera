@@ -5,6 +5,7 @@ members = [
     "crates/cubtera-kernel",
     "crates/cubtera-model",
     "crates/cubtera-source",
+    "crates/cubtera-store",
     # v2 crates - retired phase-by-phase as v3 crates replace them
     "crates/cubtera-domain",
     "crates/cubtera-core",
@@ -28,7 +29,7 @@ description = "Multi-dimensional Infrastructure Manager"
 # v3 kernel/model (zero I/O, zero async - see docs/specs/2026-09-03-cubtera-v3-architecture.md)
 blake3 = "1"
 proptest = "1"
-semver = "1.0"
+semver = { version = "1.0", features = ["serde"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Domain (zero deps)
@@ -82,6 +83,7 @@ predicates = "3"
 cubtera-kernel = { path = "crates/cubtera-kernel" }
 cubtera-model = { path = "crates/cubtera-model" }
 cubtera-source = { path = "crates/cubtera-source" }
+cubtera-store = { path = "crates/cubtera-store" }
 cubtera-domain = { path = "crates/cubtera-domain" }
 cubtera-core = { path = "crates/cubtera-core" }
 cubtera-config = { path = "crates/cubtera-config" }

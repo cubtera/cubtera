@@ -14,14 +14,30 @@
 
 mod dim_graph;
 mod error;
+mod ids;
+mod instance;
+mod lease;
+mod output_set;
+mod plan;
 mod provenance;
+mod revision;
+mod run;
+#[cfg(test)]
+mod test_support;
 mod unit_package;
 
 pub use dim_graph::{DimEdge, DimGraph, DimTypeDef, GraphError, SchemaSpec};
 pub use error::ModelError;
+pub use ids::{PlanId, RunId};
+pub use instance::Instance;
+pub use lease::Lease;
+pub use output_set::{OutputSet, OutputValue, SecretRef, StaleConsumer};
+pub use plan::{Plan, ResolutionManifest};
 pub use provenance::{
     field_provenance_for, gap_fill_merge_with_provenance, FieldProvenance, ProvenanceSource,
 };
+pub use revision::Revision;
+pub use run::{Run, RunFilter, RunOp, RunPatch, RunStatus};
 pub use unit_package::{PinnedModule, UnitPackage};
 
 pub type ModelResult<T> = Result<T, ModelError>;
