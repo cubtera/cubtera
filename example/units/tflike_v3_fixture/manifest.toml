@@ -1,0 +1,13 @@
+# Provider-free tofu fixture for `cubtera plan`/`cubtera apply` (v3,
+# P4-run) end-to-end tests - see crates/cubtera/tests/e2e_plan_apply.rs.
+#
+# Deliberately has no `terraform { required_providers = ... }` block (no
+# `local`/`random` resources like tf_unit02) so `tofu init`/`apply` never
+# touch a registry - the same reason cubtera-exec's own
+# `opentofu_apply_consumes_an_injected_dimension_variable` test builds an
+# inline fixture instead of reusing tf_unit01/tf_unit02.
+dimensions = ["dome"]
+type = "tofu"
+
+[outputs]
+publish = true

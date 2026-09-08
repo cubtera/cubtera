@@ -262,6 +262,10 @@ impl Store for SqliteStore {
             let mut sql = String::from("SELECT data FROM runs WHERE 1 = 1");
             let mut bind: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
+            if let Some(id) = &filter.id {
+                sql.push_str(&format!(" AND run_id = ?{}", bind.len() + 1));
+                bind.push(Box::new(id.as_str().to_string()));
+            }
             if let Some(org) = &filter.org {
                 sql.push_str(&format!(" AND org = ?{}", bind.len() + 1));
                 bind.push(Box::new(org.to_string()));

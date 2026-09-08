@@ -10,10 +10,14 @@ description = "Cubtera v3 application layer: use cases (resolve, validate, ...) 
 [dependencies]
 cubtera-kernel.workspace = true
 cubtera-model.workspace = true
+cubtera-store.workspace = true
+cubtera-source.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+semver.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tempfile.workspace = true

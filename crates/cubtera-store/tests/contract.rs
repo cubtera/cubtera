@@ -194,6 +194,26 @@ async fn run_lifecycle_append_then_patch() {
         .unwrap();
     assert!(none.is_empty());
 
+    // `cubtera explain run <run_id>` shape: filter by id alone.
+    let by_id = store
+        .list_runs(RunFilter {
+            id: Some(RunId::new("r1")),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(by_id.len(), 1);
+    assert_eq!(by_id[0].id, RunId::new("r1"));
+
+    let missing = store
+        .list_runs(RunFilter {
+            id: Some(RunId::new("does-not-exist")),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(missing.is_empty());
+
     let err = store
         .update_run(&RunId::new("does-not-exist"), RunPatch::default())
         .await

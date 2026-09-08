@@ -5,6 +5,7 @@
 mod app_bridge;
 mod commands;
 mod error;
+mod exec_bridge;
 
 use clap::{Parser, Subcommand};
 use tracing::Level;
@@ -56,6 +57,17 @@ enum Commands {
     /// Fleet visibility commands (v3, P3) - `Binding`/selectors land in P5
     #[command(subcommand)]
     Fleet(commands::fleet::FleetCommands),
+
+    /// Resolve and run the plan step through a capability-checked runner,
+    /// persisting the result as a reviewable `Plan` artifact (v3, P4)
+    Plan(commands::plan::PlanArgs),
+
+    /// Apply a previously created `Plan` (v3, P4) - the approval gate
+    Apply(commands::apply::ApplyArgs),
+
+    /// Explain a past `Run`/`Plan` (v3, P4)
+    #[command(subcommand)]
+    Explain(commands::explain::ExplainCommands),
 }
 
 #[tokio::main]
@@ -104,6 +116,9 @@ async fn main() {
         Commands::State(cmd) => commands::state::run(&config, &ctx, cmd).await,
         Commands::Validate(args) => commands::validate::run(&config, &ctx, args).await,
         Commands::Fleet(cmd) => commands::fleet::run(&config, &ctx, cmd).await,
+        Commands::Plan(args) => commands::plan::run(&config, &ctx, args).await,
+        Commands::Apply(args) => commands::apply::run(&config, &ctx, args).await,
+        Commands::Explain(cmd) => commands::explain::run(&config, &ctx, cmd).await,
     };
 
     if let Err(e) = result {

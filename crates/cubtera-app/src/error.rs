@@ -32,6 +32,18 @@ pub enum AppError {
     Backend(String),
 }
 
+impl From<cubtera_store::StoreError> for AppError {
+    fn from(e: cubtera_store::StoreError) -> Self {
+        AppError::Backend(e.to_string())
+    }
+}
+
+impl From<cubtera_source::SourceError> for AppError {
+    fn from(e: cubtera_source::SourceError) -> Self {
+        AppError::Backend(e.to_string())
+    }
+}
+
 impl AppError {
     pub fn not_found(entity: &'static str, id: impl Into<String>) -> Self {
         Self::NotFound {

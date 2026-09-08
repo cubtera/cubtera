@@ -1,10 +1,14 @@
 //! CLI commands
 
+pub mod apply;
 pub mod config;
+pub mod explain;
 pub mod fleet;
 pub mod im;
 pub mod log;
+pub mod plan;
 pub mod run;
+pub mod run_support;
 pub mod state;
 pub mod validate;
 

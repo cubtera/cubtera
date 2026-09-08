@@ -135,6 +135,10 @@ impl RunPatch {
 /// meaning "don't filter on this".
 #[derive(Debug, Clone, Default)]
 pub struct RunFilter {
+    /// Exact-match on a single run - `cubtera explain run <run_id>`'s
+    /// filter shape (P4-run). Combined with other fields via `AND`, though
+    /// in practice an `id` filter is specific enough on its own.
+    pub id: Option<RunId>,
     pub org: Option<Ident>,
     pub instance: Option<InstanceId>,
     pub status: Option<RunStatus>,
