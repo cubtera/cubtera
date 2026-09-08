@@ -1,0 +1,22 @@
+[package]
+name = "cubtera-exec"
+version.workspace = true
+edition.workspace = true
+description = "v3 execution adapter: rooted Workspace, ProcessRunner, capability-aware RunnerStrategy (TfLikeRunner/BashRunner)"
+
+[dependencies]
+cubtera-kernel.workspace = true
+cubtera-model.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+zip.workspace = true
+semver.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
