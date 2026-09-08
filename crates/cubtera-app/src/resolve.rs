@@ -9,6 +9,7 @@ use crate::error::{AppError, AppResult};
 use crate::ports::InventoryPort;
 use cubtera_kernel::{DimRef, Ident};
 use cubtera_model::Dimension;
+use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -50,6 +51,139 @@ impl ResolveUseCase {
     /// List every dimension name of `dim_type`.
     pub async fn list_names(&self, org: &str, dim_type: &Ident) -> AppResult<Vec<String>> {
         self.inventory.list_names(org, dim_type.as_str()).await
+    }
+
+    /// List every dimension type declared for `org` - a directory listing
+    /// (`cubtera im get-types`/`GET /v1/{org}/dim-types`).
+    pub async fn list_types(&self, org: &str) -> AppResult<Vec<String>> {
+        self.inventory.list_types(org).await
+    }
+
+    /// List every org the inventory has data for (`cubtera im
+    /// get-orgs`/`GET /v1/orgs`).
+    pub async fn list_orgs(&self) -> AppResult<Vec<String>> {
+        self.inventory.list_orgs().await
+    }
+
+    /// `dim_type`'s `.default` record, gap-filled against nothing (it *is*
+    /// the defaults) - `None` if the type has no `.default` record at all.
+    /// Unlike [`Self::resolve`], this never walks a parent chain: defaults
+    /// are per-type, not per-instance, so there is no `meta.parent` to
+    /// follow.
+    pub async fn get_defaults(&self, org: &str, dim_type: &Ident) -> AppResult<Option<Dimension>> {
+        let defaults = self
+            .inventory
+            .get_raw_defaults(org, dim_type.as_str())
+            .await?;
+        Ok(defaults.map(|raw| {
+            // `.default` is a per-type pseudo-record, not a real
+            // `type:name` dimension - `Ident::parse(".default")` would
+            // reject the leading dot, so we reuse `dim_type` for both
+            // halves of the synthetic key. Nothing reads `key`/`key_path`
+            // off the result; callers only care about `sections`/`meta()`.
+            let key = DimRef::new(dim_type.clone(), dim_type.clone());
+            Dimension::assemble(key, raw, None, None)
+        }))
+    }
+
+    /// The JSON-schema for `dim_type` (its `.schema` record's "meta"
+    /// section), if one is defined - a direct passthrough, schemas have
+    /// no gap-fill/parent-chain concept of their own.
+    pub async fn get_schema(&self, org: &str, dim_type: &Ident) -> AppResult<Option<Value>> {
+        self.inventory.get_raw_schema(org, dim_type.as_str()).await
+    }
+
+    /// `name`'s resolved parent, if it has one - `None` both when `name`
+    /// doesn't exist and when it exists but has no `meta.parent` (callers
+    /// that need to distinguish those should call [`Self::try_resolve`]
+    /// first).
+    pub async fn get_parent(
+        &self,
+        org: &str,
+        dim_type: &Ident,
+        name: &Ident,
+    ) -> AppResult<Option<Dimension>> {
+        let dim = match self.try_resolve(org, dim_type, name).await? {
+            Some(dim) => dim,
+            None => return Ok(None),
+        };
+        match &dim.parent_ref {
+            Some(parent_ref) => {
+                self.try_resolve(org, &parent_ref.dim_type, &parent_ref.name)
+                    .await
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Every dimension of the type immediately below `dim_type` in
+    /// `dim_relations` (`Config::dim_relations`, e.g. `["dome", "env",
+    /// "dc"]`) whose resolved `meta.parent` points back at `dim_type:name`.
+    /// Empty if `dim_type` is the last type in the chain, or has no
+    /// children yet - never an error either way, matching v2's
+    /// `DimensionService::get_children`/`compute_kids`.
+    pub async fn get_children(
+        &self,
+        org: &str,
+        dim_relations: &[String],
+        dim_type: &Ident,
+        name: &Ident,
+    ) -> AppResult<Vec<Dimension>> {
+        let Some(child_type) = child_type_of(dim_relations, dim_type.as_str()) else {
+            return Ok(Vec::new());
+        };
+        let child_type = Ident::parse(&child_type)?;
+        let parent_key = format!("{dim_type}:{name}");
+
+        let child_names = self.inventory.list_names(org, child_type.as_str()).await?;
+        let mut children = Vec::new();
+        for child_name in child_names {
+            let child_name = Ident::parse(&child_name)?;
+            if let Some(dim) = self.try_resolve(org, &child_type, &child_name).await? {
+                if dim.parent_ref.as_ref().map(DimRef::to_string) == Some(parent_key.clone()) {
+                    children.push(dim);
+                }
+            }
+        }
+        Ok(children)
+    }
+
+    /// `type:name` refs of every direct child of `dim_type:name` - the
+    /// same computation as [`Self::get_children`], just names instead of
+    /// fully-resolved `Dimension`s (what [`cubtera_model::Dimension::to_response_json`]'s
+    /// `kids` field wants, without paying for a full resolve per child).
+    pub async fn kids_of(
+        &self,
+        org: &str,
+        dim_relations: &[String],
+        dim_type: &Ident,
+        name: &Ident,
+    ) -> AppResult<Vec<String>> {
+        Ok(self
+            .get_children(org, dim_relations, dim_type, name)
+            .await?
+            .iter()
+            .map(|d| d.key.to_string())
+            .collect())
+    }
+
+    /// Validate `name`'s "meta" section against `dim_type`'s JSON-schema
+    /// (`.schema:meta.json`), if one is defined. Every violation is
+    /// returned as a human-readable string; an empty vec means either
+    /// "valid" or "no schema declared" - both are a non-error outcome,
+    /// schemas are opt-in (matches v2's `SchemaValidation::{NoSchema,
+    /// Valid}` collapsing to the same `{"valid": true}` response).
+    pub async fn validate_schema(
+        &self,
+        org: &str,
+        dim_type: &Ident,
+        name: &Ident,
+    ) -> AppResult<Vec<String>> {
+        let dim = self.resolve(org, dim_type, name).await?;
+        let Some(schema) = self.get_schema(org, dim_type).await? else {
+            return Ok(Vec::new());
+        };
+        Ok(cubtera_model::SchemaSpec::Explicit(schema).validate(dim.meta()))
     }
 
     fn resolve_inner<'a>(
@@ -103,6 +237,15 @@ impl ResolveUseCase {
             Ok(Some(dim))
         })
     }
+}
+
+/// The dimension type immediately after `dim_type` in `dim_relations`
+/// (an ordered parent-to-child chain, e.g. `["dome", "env", "dc"]`) -
+/// `None` if `dim_type` isn't in the chain at all, or is its last entry.
+/// Ported from v2's `cubtera_domain::DimHierarchy::child_type`.
+fn child_type_of(dim_relations: &[String], dim_type: &str) -> Option<String> {
+    let pos = dim_relations.iter().position(|t| t == dim_type)?;
+    dim_relations.get(pos + 1).cloned()
 }
 
 #[cfg(test)]
@@ -182,10 +325,18 @@ mod tests {
 
         async fn get_raw_schema(
             &self,
-            _org: &str,
-            _dim_type: &str,
+            org: &str,
+            dim_type: &str,
         ) -> AppResult<Option<serde_json::Value>> {
-            Ok(None)
+            Ok(self
+                .data
+                .lock()
+                .unwrap()
+                .get(org)
+                .and_then(|t| t.get(dim_type))
+                .and_then(|n| n.get(".schema"))
+                .and_then(|s| s.get("meta"))
+                .cloned())
         }
 
         async fn list_names(&self, org: &str, dim_type: &str) -> AppResult<Vec<String>> {
@@ -214,6 +365,20 @@ mod tests {
             _dim_type: &str,
         ) -> AppResult<Vec<cubtera_model::IncludeEntry>> {
             Ok(Vec::new())
+        }
+
+        async fn list_types(&self, org: &str) -> AppResult<Vec<String>> {
+            Ok(self
+                .data
+                .lock()
+                .unwrap()
+                .get(org)
+                .map(|t| t.keys().cloned().collect())
+                .unwrap_or_default())
+        }
+
+        async fn list_orgs(&self) -> AppResult<Vec<String>> {
+            Ok(self.data.lock().unwrap().keys().cloned().collect())
         }
     }
 
@@ -303,5 +468,131 @@ mod tests {
         let uc = use_case_with_tree();
         let names = uc.list_names("cubtera", &ident("dc")).await.unwrap();
         assert_eq!(names, vec!["us-east-1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn list_types_and_orgs_delegate_to_the_port() {
+        let uc = use_case_with_tree();
+        let mut types = uc.list_types("cubtera").await.unwrap();
+        types.sort();
+        assert_eq!(
+            types,
+            vec!["dc".to_string(), "dome".to_string(), "env".to_string()]
+        );
+        assert_eq!(uc.list_orgs().await.unwrap(), vec!["cubtera".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn get_parent_walks_one_level_up() {
+        let uc = use_case_with_tree();
+        let parent = uc
+            .get_parent("cubtera", &ident("dc"), &ident("us-east-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(parent.key.to_string(), "env:prod");
+
+        // The root has no parent.
+        assert!(uc
+            .get_parent("cubtera", &ident("dome"), &ident("prod"))
+            .await
+            .unwrap()
+            .is_none());
+
+        // A missing dimension has no parent either (not an error).
+        assert!(uc
+            .get_parent("cubtera", &ident("dc"), &ident("missing"))
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn get_children_finds_direct_children_via_dim_relations() {
+        let uc = use_case_with_tree();
+        let relations = vec!["dome".to_string(), "env".to_string(), "dc".to_string()];
+
+        let children = uc
+            .get_children("cubtera", &relations, &ident("env"), &ident("prod"))
+            .await
+            .unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].key.to_string(), "dc:us-east-1");
+
+        // The last type in the chain has no children.
+        assert!(uc
+            .get_children("cubtera", &relations, &ident("dc"), &ident("us-east-1"))
+            .await
+            .unwrap()
+            .is_empty());
+
+        let kids = uc
+            .kids_of("cubtera", &relations, &ident("env"), &ident("prod"))
+            .await
+            .unwrap();
+        assert_eq!(kids, vec!["dc:us-east-1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn get_defaults_reads_the_default_record_with_no_gap_fill() {
+        let inv = FakeInventory::new();
+        inv.insert(
+            "cubtera",
+            "dc",
+            ".default",
+            sections(json!({"meta": {"region": "us-east-1"}})),
+        );
+        let uc = ResolveUseCase::new(Arc::new(inv));
+
+        let defaults = uc
+            .get_defaults("cubtera", &ident("dc"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(defaults.meta()["region"], "us-east-1");
+
+        assert!(uc
+            .get_defaults("cubtera", &ident("env"))
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn get_schema_and_validate_schema() {
+        let inv = FakeInventory::new();
+        inv.insert(
+            "cubtera",
+            "dc",
+            "prod",
+            sections(json!({"meta": {"name": "x"}})),
+        );
+        inv.insert(
+            "cubtera",
+            "dc",
+            ".schema",
+            sections(json!({"meta": {"type": "object", "required": ["region"]}})),
+        );
+        let uc = ResolveUseCase::new(Arc::new(inv));
+
+        let schema = uc.get_schema("cubtera", &ident("dc")).await.unwrap();
+        assert_eq!(schema.unwrap()["required"][0], "region");
+
+        let errors = uc
+            .validate_schema("cubtera", &ident("dc"), &ident("prod"))
+            .await
+            .unwrap();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("region"));
+
+        // No schema declared for "env" - always valid.
+        let inv2 = FakeInventory::new();
+        inv2.insert("cubtera", "env", "prod", sections(json!({"meta": {}})));
+        let uc2 = ResolveUseCase::new(Arc::new(inv2));
+        assert!(uc2
+            .validate_schema("cubtera", &ident("env"), &ident("prod"))
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

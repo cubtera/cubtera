@@ -4,10 +4,9 @@
 //! `cubtera_app::AppError` instead of v2's `cubtera_core::error::AppError`.
 //! The whole point of P7's server is that it can drive `cubtera-app`'s
 //! use cases directly, so its error boundary maps *that* crate's error
-//! type. `run_support`'s v2 seam (`UnitService::build_unit_with_extensions`,
-//! materializing a unit's files) still raises `cubtera_core::error::AppError`
-//! for a handful of failure modes (access denied, manifest not found), so
-//! this also accepts that type via a second `From` impl.
+//! type - `cubtera-server` has no `cubtera-core`/`cubtera-domain`/
+//! `cubtera-persistence` dependency left at all (see `run_support.rs`'s
+//! doc comment).
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -38,28 +37,7 @@ impl From<cubtera_app::AppError> for ApiError {
     }
 }
 
-impl From<cubtera_core::error::AppError> for ApiError {
-    fn from(err: cubtera_core::error::AppError) -> Self {
-        use cubtera_core::error::AppError as E;
-        let (status, problem_type) = match &err {
-            E::NotFound { .. } => (StatusCode::NOT_FOUND, "not-found"),
-            E::Validation(_) | E::Domain(_) => (StatusCode::BAD_REQUEST, "validation"),
-            E::AccessDenied(_) => (StatusCode::FORBIDDEN, "access-denied"),
-            E::Config(_) => (StatusCode::INTERNAL_SERVER_ERROR, "config"),
-            E::Repository(_) | E::Runner(_) | E::Io(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal")
-            }
-        };
-        Self {
-            status,
-            problem_type,
-            detail: err.to_string(),
-        }
-    }
-}
-
-/// `Repositories::from_config`'s error type - a bare `String`, not an
-/// `AppError` (see `cubtera_persistence::Repositories::from_config`).
+/// A bare `String` error (e.g. from `SqliteStore::open`), not an `AppError`.
 impl From<String> for ApiError {
     fn from(err: String) -> Self {
         Self {

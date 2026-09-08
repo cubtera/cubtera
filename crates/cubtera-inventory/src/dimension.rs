@@ -213,6 +213,43 @@ impl InventoryPort for FsInventoryPort {
             .await?;
         Ok(raw.map(|r| r.includes).unwrap_or_default())
     }
+
+    async fn list_types(&self, org: &str) -> AppResult<Vec<String>> {
+        let dir = self.base_path.join(org);
+        tokio::task::spawn_blocking(move || list_subdirs_blocking(&dir))
+            .await
+            .map_err(|e| AppError::backend(format!("blocking task panicked: {e}")))?
+    }
+
+    async fn list_orgs(&self) -> AppResult<Vec<String>> {
+        let dir = self.base_path.clone();
+        tokio::task::spawn_blocking(move || list_subdirs_blocking(&dir))
+            .await
+            .map_err(|e| AppError::backend(format!("blocking task panicked: {e}")))?
+    }
+}
+
+/// Every immediate subdirectory name of `dir`, sorted - the on-disk
+/// convention for "every org" (`<inventory_path>/{org}`) and "every
+/// dimension type" (`<inventory_path>/{org}/{dim_type}`) alike. Ported
+/// verbatim from v2's `FsInventoryRepository::list_types`/`list_orgs`.
+fn list_subdirs_blocking(dir: &Path) -> AppResult<Vec<String>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut names = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|e| AppError::backend(format!("{dir:?}: {e}")))? {
+        let entry = entry.map_err(|e| AppError::backend(e.to_string()))?;
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names.sort();
+    Ok(names)
 }
 
 fn list_names_blocking(dir: &Path, separator: &str) -> AppResult<Vec<String>> {
@@ -375,6 +412,31 @@ mod tests {
         let includes = port.list_default_includes("cubtera", "dc").await.unwrap();
         assert_eq!(includes.len(), 1);
         assert_eq!(includes[0].name, "keys.pem");
+    }
+
+    #[tokio::test]
+    async fn list_types_and_orgs_scan_subdirectories() {
+        let tmp = tempdir().unwrap();
+        write(&tmp.path().join("cubtera").join("dc"), "prod.json", "{}");
+        write(&tmp.path().join("cubtera").join("env"), "prod.json", "{}");
+        write(&tmp.path().join("other-org").join("dc"), "prod.json", "{}");
+
+        let port = FsInventoryPort::new(tmp.path());
+        let mut types = port.list_types("cubtera").await.unwrap();
+        types.sort();
+        assert_eq!(types, vec!["dc".to_string(), "env".to_string()]);
+
+        let mut orgs = port.list_orgs().await.unwrap();
+        orgs.sort();
+        assert_eq!(orgs, vec!["cubtera".to_string(), "other-org".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn list_types_and_orgs_on_missing_root_return_empty() {
+        let tmp = tempdir().unwrap();
+        let port = FsInventoryPort::new(tmp.path().join("nope"));
+        assert!(port.list_types("cubtera").await.unwrap().is_empty());
+        assert!(port.list_orgs().await.unwrap().is_empty());
     }
 
     #[tokio::test]

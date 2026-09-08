@@ -100,6 +100,53 @@ impl Dimension {
     pub fn section(&self, name: &str) -> Option<&Value> {
         self.sections.get(name)
     }
+
+    /// Render this dimension as a full resource: its section data plus
+    /// resolution metadata that isn't itself part of any section (`name`,
+    /// `type`, `parent`, `key_path`, `content_hash`, `kids`) - the same
+    /// shape v2's `cubtera_domain::Dimension::to_response_json` produced,
+    /// so REST API/CLI/MCP responses don't change shape across the
+    /// rewire. `kids` is a pure function's input rather than a field on
+    /// `Dimension` itself (computing it needs `InventoryPort::list_names`,
+    /// I/O this crate can't do) - callers resolve it via
+    /// `cubtera_app::ResolveUseCase::get_children` first.
+    pub fn to_response_json(&self, kids: &[String]) -> Value {
+        let mut obj: Map<String, Value> = self
+            .sections
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        obj.insert("name".to_string(), Value::String(self.key.name.to_string()));
+        obj.insert(
+            "type".to_string(),
+            Value::String(self.key.dim_type.to_string()),
+        );
+        obj.insert(
+            "parent".to_string(),
+            self.parent_ref
+                .as_ref()
+                .map(|r| Value::String(r.to_string()))
+                .unwrap_or(Value::Null),
+        );
+        obj.insert(
+            "key_path".to_string(),
+            Value::Array(
+                self.key_path
+                    .iter()
+                    .map(|r| Value::String(r.to_string()))
+                    .collect(),
+            ),
+        );
+        obj.insert(
+            "content_hash".to_string(),
+            Value::String(self.content_hash.to_string()),
+        );
+        obj.insert(
+            "kids".to_string(),
+            Value::Array(kids.iter().cloned().map(Value::String).collect()),
+        );
+        Value::Object(obj)
+    }
 }
 
 fn map_from_sections(sections: BTreeMap<String, Value>) -> Map<String, Value> {
@@ -207,6 +254,22 @@ mod tests {
         let dim_a = Dimension::assemble(dim_ref("dc:x"), a, None, None);
         let dim_b = Dimension::assemble(dim_ref("dc:x"), b, None, None);
         assert_eq!(dim_a.content_hash, dim_b.content_hash);
+    }
+
+    #[test]
+    fn to_response_json_embeds_resolution_metadata() {
+        let root = Dimension::assemble(dim_ref("dome:prod"), BTreeMap::new(), None, None);
+        let own = sections(json!({"meta": {"parent": "dome:prod", "region": "us-east-1"}}));
+        let child = Dimension::assemble(dim_ref("env:prod"), own, None, Some(&root));
+
+        let json = child.to_response_json(&["dc:prod-use1".to_string()]);
+        assert_eq!(json["name"], "prod");
+        assert_eq!(json["type"], "env");
+        assert_eq!(json["parent"], "dome:prod");
+        assert_eq!(json["key_path"], json!(["dome:prod", "env:prod"]));
+        assert_eq!(json["kids"], json!(["dc:prod-use1"]));
+        assert_eq!(json["meta"]["region"], "us-east-1");
+        assert!(json["content_hash"].is_string());
     }
 
     #[test]

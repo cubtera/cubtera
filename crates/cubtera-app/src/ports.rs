@@ -39,6 +39,25 @@ pub trait InventoryPort: Send + Sync {
     /// List all dimension names of a given type (excludes reserved names).
     async fn list_names(&self, org: &str, dim_type: &str) -> AppResult<Vec<String>>;
 
+    /// List every dimension type declared for `org` (a directory listing,
+    /// for `FsInventoryPort` - v3 mostly gets dim types from
+    /// `Config::dim_relations` instead, but `cubtera im get-types`/`GET
+    /// /v1/{org}/dim-types` still discover them from the inventory itself,
+    /// same as v2). Default: empty - only `FsInventoryPort` needs this to
+    /// do anything real; fakes used purely for `resolve`/`validate`
+    /// unit tests don't have to implement directory discovery just to
+    /// satisfy the trait.
+    async fn list_types(&self, _org: &str) -> AppResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    /// List every org the inventory has data for (a directory listing, for
+    /// `FsInventoryPort`) - see [`Self::list_types`] for why this defaults
+    /// to empty rather than being a required override.
+    async fn list_orgs(&self) -> AppResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+
     /// List non-JSON includes (files/folders, the on-disk convention's
     /// `{name}{sep}{file}` entries) attached directly to this dimension -
     /// empty if it has none. Kept as its own method (rather than folded

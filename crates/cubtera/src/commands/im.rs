@@ -1,11 +1,16 @@
 //! Inventory management commands
+//!
+//! v3-native: `cubtera_app::ResolveUseCase` over `FsInventoryPort` (see
+//! `run_support::inventory_port`) - no `cubtera-core`/`cubtera-persistence`
+//! dependency in this module.
 
+use super::run_support::inventory_port;
 use super::Ctx;
 use clap::Subcommand;
+use cubtera_app::{AppError, ResolveUseCase};
 use cubtera_config::Config;
-use cubtera_core::services::{DimensionService, SchemaValidation};
-use cubtera_domain::Dimension;
-use cubtera_persistence::Repositories;
+use cubtera_kernel::Ident;
+use cubtera_model::Dimension;
 use serde_json::{json, Value};
 
 #[derive(Subcommand)]
@@ -73,87 +78,111 @@ pub async fn run(
     ctx: &Ctx,
     cmd: ImCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let repos = Repositories::from_config(config).await?;
-    let hierarchy = Repositories::hierarchy(config);
-    let service = DimensionService::new(repos.inventory, hierarchy);
+    let resolve = ResolveUseCase::new(inventory_port(config));
 
     match cmd {
         ImCommands::GetAll { dim_type } => {
-            let names = service.get_all_names(&config.org, &dim_type).await?;
+            let names = resolve
+                .list_names(&config.org, &parse_ident(&dim_type)?)
+                .await?;
             print_list(ctx, &names);
         }
 
         ImCommands::Get { dim_type, name } => {
-            let dim = service.get_by_name(&config.org, &dim_type, &name).await?;
-            print_dimension(ctx, &dim);
+            let dim_type = parse_ident(&dim_type)?;
+            let name = parse_ident(&name)?;
+            let dim = resolve.resolve(&config.org, &dim_type, &name).await?;
+            let kids = resolve
+                .kids_of(&config.org, &config.dim_relations, &dim_type, &name)
+                .await?;
+            print_dimension(ctx, &dim, &kids);
         }
 
         ImCommands::GetDefaults { dim_type } => {
-            let dim = service.get_defaults(&config.org, &dim_type).await?;
+            let dim_type_str = dim_type.clone();
+            let dim = resolve
+                .get_defaults(&config.org, &parse_ident(&dim_type)?)
+                .await?;
             if ctx.json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&dim.as_ref().map(dimension_to_json))?
+                    serde_json::to_string_pretty(&dim.as_ref().map(|d| d.to_response_json(&[])))?
                 );
             } else {
                 match dim {
-                    Some(dim) => println!("Default for {}: {}", dim_type, dim.name),
-                    None => println!("No defaults for {}", dim_type),
+                    Some(_) => println!("Default for {dim_type_str}: present"),
+                    None => println!("No defaults for {dim_type_str}"),
                 }
             }
         }
 
         ImCommands::GetSchema { dim_type } => {
-            let schema = service.get_schema(&config.org, &dim_type).await?;
+            let dim_type_str = dim_type.clone();
+            let schema = resolve
+                .get_schema(&config.org, &parse_ident(&dim_type)?)
+                .await?;
             if ctx.json {
                 println!("{}", serde_json::to_string_pretty(&schema)?);
             } else {
                 match schema {
                     Some(schema) => println!("{}", serde_json::to_string_pretty(&schema)?),
-                    None => println!("No schema for {}", dim_type),
+                    None => println!("No schema for {dim_type_str}"),
                 }
             }
         }
 
         ImCommands::GetChildren { dim_type, name } => {
-            let children = service.get_children(&config.org, &dim_type, &name).await?;
+            let dim_type = parse_ident(&dim_type)?;
+            let name = parse_ident(&name)?;
+            let children = resolve
+                .get_children(&config.org, &config.dim_relations, &dim_type, &name)
+                .await?;
             if ctx.json {
-                let items: Vec<Value> = children.iter().map(dimension_to_json).collect();
+                let items: Vec<Value> = children.iter().map(|d| d.to_response_json(&[])).collect();
                 println!("{}", serde_json::to_string_pretty(&items)?);
             } else {
                 for child in &children {
-                    println!("{}:{}", child.dim_type, child.name);
+                    println!("{}", child.key);
                 }
             }
         }
 
         ImCommands::GetParent { dim_type, name } => {
-            let parent = service.get_parent(&config.org, &dim_type, &name).await?;
+            let dim_type = parse_ident(&dim_type)?;
+            let name = parse_ident(&name)?;
+            let parent = resolve.get_parent(&config.org, &dim_type, &name).await?;
             if ctx.json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&parent.as_ref().map(dimension_to_json))?
+                    serde_json::to_string_pretty(
+                        &parent.as_ref().map(|d| d.to_response_json(&[]))
+                    )?
                 );
             } else {
-                match parent {
-                    Some(parent) => println!("{}:{}", parent.dim_type, parent.name),
-                    None => println!("No parent for {}:{}", dim_type, name),
+                match &parent {
+                    Some(parent) => println!("{}", parent.key),
+                    None => println!("No parent for {dim_type}:{name}"),
                 }
             }
         }
 
         ImCommands::GetTypes => {
-            let types = service.get_types(&config.org).await?;
+            let types = resolve.list_types(&config.org).await?;
             print_list(ctx, &types);
         }
 
         ImCommands::GetOrgs => {
-            let orgs = service.get_orgs().await?;
+            let orgs = resolve.list_orgs().await?;
             print_list(ctx, &orgs);
         }
 
         ImCommands::Validate { dim_type, name } => {
-            let exists = service.validate(&config.org, &dim_type, &name).await?;
+            let dim_type_i = parse_ident(&dim_type)?;
+            let name_i = parse_ident(&name)?;
+            let exists = resolve
+                .try_resolve(&config.org, &dim_type_i, &name_i)
+                .await?
+                .is_some();
             if !exists {
                 if ctx.json {
                     println!(
@@ -165,20 +194,17 @@ pub async fn run(
                         }))?
                     );
                 } else {
-                    eprintln!("Invalid: {}:{} does not exist", dim_type, name);
+                    eprintln!("Invalid: {dim_type}:{name} does not exist");
                 }
                 std::process::exit(crate::error::EXIT_NOT_FOUND);
             }
 
-            let outcome = service
-                .validate_schema(&config.org, &dim_type, &name)
+            let errors = resolve
+                .validate_schema(&config.org, &dim_type_i, &name_i)
                 .await?;
+            let valid = errors.is_empty();
 
             if ctx.json {
-                let (valid, errors): (bool, Vec<String>) = match &outcome {
-                    SchemaValidation::NoSchema | SchemaValidation::Valid => (true, vec![]),
-                    SchemaValidation::Invalid(errors) => (false, errors.clone()),
-                };
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&json!({
@@ -187,27 +213,16 @@ pub async fn run(
                         "errors": errors,
                     }))?
                 );
+            } else if valid {
+                println!("Valid: {dim_type}:{name}");
             } else {
-                match &outcome {
-                    SchemaValidation::NoSchema => {
-                        println!("Valid: {}:{} exists (no schema defined)", dim_type, name)
-                    }
-                    SchemaValidation::Valid => {
-                        println!("Valid: {}:{} satisfies its schema", dim_type, name)
-                    }
-                    SchemaValidation::Invalid(errors) => {
-                        eprintln!(
-                            "Invalid: {}:{} does not satisfy its schema:",
-                            dim_type, name
-                        );
-                        for error in errors {
-                            eprintln!("  - {error}");
-                        }
-                    }
+                eprintln!("Invalid: {dim_type}:{name} does not satisfy its schema:");
+                for error in &errors {
+                    eprintln!("  - {error}");
                 }
             }
 
-            if !outcome.is_ok() {
+            if !valid {
                 std::process::exit(crate::error::EXIT_VALIDATION);
             }
         }
@@ -216,50 +231,37 @@ pub async fn run(
     Ok(())
 }
 
+fn parse_ident(raw: &str) -> Result<Ident, Box<dyn std::error::Error>> {
+    Ident::parse(raw).map_err(|e| Box::new(AppError::from(e)) as Box<dyn std::error::Error>)
+}
+
 fn print_list(ctx: &Ctx, items: &[String]) {
     if ctx.json {
         println!("{}", serde_json::to_string_pretty(items).unwrap());
     } else {
         for item in items {
-            println!("{}", item);
+            println!("{item}");
         }
     }
 }
 
-fn print_dimension(ctx: &Ctx, dim: &Dimension) {
+fn print_dimension(ctx: &Ctx, dim: &Dimension, kids: &[String]) {
     if ctx.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&dimension_to_json(dim)).unwrap()
+            serde_json::to_string_pretty(&dim.to_response_json(kids)).unwrap()
         );
         return;
     }
 
-    println!("{}:{}", dim.dim_type, dim.name);
+    println!("{}", dim.key);
     if let Some(parent) = &dim.parent_ref {
-        println!("  Parent: {}", parent);
+        println!("  Parent: {parent}");
     }
-    if !dim.data.is_empty() {
-        println!("  Data: {} keys", dim.data.len());
+    if !dim.sections.is_empty() {
+        println!("  Data: {} sections", dim.sections.len());
     }
-    if !dim.kids.is_empty() {
-        println!("  Kids: {:?}", dim.kids);
+    if !kids.is_empty() {
+        println!("  Kids: {kids:?}");
     }
-}
-
-/// Render a [`Dimension`] as one JSON object: its sections plus the
-/// resolution metadata (`name`/`type`/`parent`/`key_path`/`data_sha`/`kids`)
-/// that isn't itself part of any section's data.
-fn dimension_to_json(dim: &Dimension) -> Value {
-    let mut obj = match dim.to_json() {
-        Value::Object(map) => map,
-        _ => serde_json::Map::new(),
-    };
-    obj.insert("name".to_string(), json!(dim.name));
-    obj.insert("type".to_string(), json!(dim.dim_type.as_str()));
-    obj.insert("parent".to_string(), json!(dim.parent_ref));
-    obj.insert("key_path".to_string(), json!(dim.key_path));
-    obj.insert("data_sha".to_string(), json!(dim.data_sha));
-    obj.insert("kids".to_string(), json!(dim.kids));
-    Value::Object(obj)
 }
