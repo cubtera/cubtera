@@ -12,6 +12,7 @@
 //!
 //! See docs/specs/2026-09-03-cubtera-v3-architecture.md ยง5.
 
+mod access;
 mod binding;
 mod dim_graph;
 mod dimension;
@@ -19,6 +20,8 @@ mod error;
 mod ids;
 mod instance;
 mod lease;
+mod manifest;
+mod materialization;
 mod output_set;
 mod plan;
 mod policy;
@@ -28,8 +31,10 @@ mod run;
 mod state_projection;
 #[cfg(test)]
 mod test_support;
+mod unit;
 mod unit_package;
 
+pub use access::{AccessDecision, AccessPolicy, DimensionAccessContext};
 pub use binding::{Binding, Literal, Path, Selector, SelectorContext};
 pub use dim_graph::{DimEdge, DimGraph, DimTypeDef, GraphError, SchemaSpec};
 pub use dimension::Dimension;
@@ -37,6 +42,8 @@ pub use error::ModelError;
 pub use ids::{PlanId, RunId};
 pub use instance::Instance;
 pub use lease::Lease;
+pub use manifest::{EnvVars, Files, InputSpec, Manifest, OutputsSpec, RunnerType, Spec};
+pub use materialization::{MaterializationPlan, MaterializationStep};
 pub use output_set::{OutputSet, OutputValue, SecretRef, StaleConsumer};
 pub use plan::{Plan, ResolutionManifest};
 pub use policy::{context_for, Effect, Policy, PolicyDecision, PolicyRule};
@@ -46,6 +53,7 @@ pub use provenance::{
 pub use revision::Revision;
 pub use run::{Run, RunFilter, RunOp, RunPatch, RunStatus};
 pub use state_projection::project_state_key;
+pub use unit::{IncludeEntry, Unit};
 pub use unit_package::{PinnedModule, UnitPackage};
 
 pub type ModelResult<T> = Result<T, ModelError>;

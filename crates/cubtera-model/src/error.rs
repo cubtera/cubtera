@@ -19,6 +19,14 @@ pub enum ModelError {
     /// consumer's resolved dimension chain onto a producer's required
     /// dimension types - never a guess, always a hard error.
     InputResolution(String),
+    /// `Manifest::from_toml` failed to parse `manifest.toml` (P7's
+    /// v2->v3 manifest port, `manifest.rs`).
+    InvalidManifest(String),
+    /// A `spec.files` destination in a manifest isn't a safe relative path
+    /// (`Unit::materialize`, `unit.rs`) - rejected before any `Workspace`
+    /// ever touches disk, per the same kernel-seam rationale as everywhere
+    /// else path segments come from user-authored config.
+    InvalidPath(String),
 }
 
 impl fmt::Display for ModelError {
@@ -43,6 +51,8 @@ impl fmt::Display for ModelError {
             }
             Self::Selector(msg) => write!(f, "invalid selector: {msg}"),
             Self::InputResolution(msg) => write!(f, "{msg}"),
+            Self::InvalidManifest(msg) => write!(f, "invalid manifest: {msg}"),
+            Self::InvalidPath(msg) => write!(f, "invalid path: {msg}"),
         }
     }
 }
