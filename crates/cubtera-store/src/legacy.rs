@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// A v2-shaped deployment-log row, kept only so `cubtera-persistence`'s
 /// `DeploymentLogRepository` adapter can share this store's SQLite file
@@ -25,6 +25,24 @@ pub struct LegacyDeploymentLogRow {
     pub duration_ms: u64,
     pub git_shas: BTreeMap<String, String>,
     pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+impl LegacyDeploymentLogRow {
+    /// Whether this row satisfies every `key:value` pair in `query` -
+    /// ported verbatim from v2's `cubtera_core::ports::deployment_log::entry_matches`
+    /// so `cubtera log get`/`GET /v1/{org}/dlog` keep exactly the same
+    /// query semantics without a `cubtera-core` dependency: `unit`/
+    /// `unit_name` and `command` match the corresponding field exactly;
+    /// everything else is treated as a dimension type and checked against
+    /// `dimensions` (`type:name` strings).
+    pub fn matches(&self, query: &HashMap<String, String>) -> bool {
+        query.iter().all(|(key, value)| match key.as_str() {
+            "unit" | "unit_name" => self.unit_name == *value,
+            "command" => self.command == *value,
+            "exit_code" => self.exit_code.to_string() == *value,
+            _ => self.dimensions.contains(&format!("{key}:{value}")),
+        })
+    }
 }
 
 /// A v2-shaped unit-state row - see [`LegacyDeploymentLogRow`] for why this
@@ -61,6 +79,48 @@ impl LegacyUnitStateRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn log_row() -> LegacyDeploymentLogRow {
+        LegacyDeploymentLogRow {
+            org: "cubtera".to_string(),
+            unit_name: "network".to_string(),
+            dimensions: vec!["dome:prod".to_string(), "env:prod".to_string()],
+            command: "apply".to_string(),
+            exit_code: 0,
+            timestamp: 1_700_000_000,
+            duration_ms: 1234,
+            git_shas: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn matches_by_unit_name() {
+        let mut query = HashMap::new();
+        query.insert("unit".to_string(), "network".to_string());
+        assert!(log_row().matches(&query));
+
+        query.insert("unit".to_string(), "other".to_string());
+        assert!(!log_row().matches(&query));
+    }
+
+    #[test]
+    fn matches_by_dimension() {
+        let mut query = HashMap::new();
+        query.insert("env".to_string(), "prod".to_string());
+        assert!(log_row().matches(&query));
+
+        query.insert("env".to_string(), "staging".to_string());
+        assert!(!log_row().matches(&query));
+    }
+
+    #[test]
+    fn matches_requires_every_query_key() {
+        let mut query = HashMap::new();
+        query.insert("unit".to_string(), "network".to_string());
+        query.insert("command".to_string(), "destroy".to_string());
+        assert!(!log_row().matches(&query));
+    }
 
     #[test]
     fn state_key_is_order_independent() {

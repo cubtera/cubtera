@@ -1,11 +1,14 @@
-//! Deployment log query endpoint - `cubtera-api`'s `dlog.rs`, same seam
-//! rationale as `inventory.rs`.
+//! Deployment log query endpoint - v3-native, reads
+//! `cubtera_store::LegacyDeploymentLogRow` (the same SQLite table v2's
+//! `DeploymentLogRepository`/`cubtera run` write to) directly, no
+//! `cubtera-core`/`cubtera-persistence` dependency. Same seam rationale as
+//! `cubtera log get` (`crates/cubtera/src/commands/log.rs`).
 
 use crate::error::ApiError;
 use crate::server::AppState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use cubtera_persistence::Repositories;
+use cubtera_store::SqliteStore;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -23,9 +26,8 @@ pub async fn get_deployment_log(
     Path(org): Path<String>,
     Query(params): Query<DlogQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let repos = Repositories::from_config(&state.config)
-        .await
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let store = SqliteStore::open(&state.config.store_path)
+        .map_err(|e| ApiError::bad_request(format!("failed to open store: {e}")))?;
 
     let mut query = HashMap::new();
     for pair in params.q.iter().flat_map(|q| q.split(',')) {
@@ -34,9 +36,13 @@ pub async fn get_deployment_log(
         }
     }
 
-    let entries = repos
-        .deployment_log
-        .find(&org, &query, params.limit.or(Some(10)))
-        .await?;
-    Ok(Json(json!(entries)))
+    let mut rows = store
+        .find_legacy_deployment_log(&org)
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    rows.retain(|row| row.matches(&query));
+    rows.sort_by_key(|row| std::cmp::Reverse(row.timestamp));
+    rows.truncate(params.limit.unwrap_or(10));
+
+    Ok(Json(json!(rows)))
 }

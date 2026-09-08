@@ -5,14 +5,23 @@
 //! resolution, which happens automatically inside `cubtera run`. These
 //! commands are for inspecting/clearing published state directly, e.g. to
 //! debug a stale value or force a producer to be re-run.
+//!
+//! v3-native: reads/writes `cubtera_store::LegacyUnitStateRow` (the same
+//! SQLite table v2's `UnitStateRepository`/`cubtera run` write to) directly,
+//! with no `cubtera-core`/`cubtera-persistence`/`cubtera-domain` dependency
+//! in this module. `org`/`unit`/every `dims`/`ext` entry are validated
+//! through `cubtera_kernel::{Ident, DimRef}` before touching the store,
+//! same rationale as `cubtera_domain::UnitStateKey::try_new` (an
+//! unvalidated `dims = ["../../../tmp/pwned"]` would otherwise be a
+//! path-traversal payload once a future non-SQL adapter joins it onto a
+//! filesystem path).
 
 use super::Ctx;
 use clap::Subcommand;
+use cubtera_app::AppError;
 use cubtera_config::Config;
-use cubtera_core::error::AppError;
-use cubtera_domain::UnitStateKey;
-use cubtera_persistence::Repositories;
-use cubtera_store::Store as _;
+use cubtera_kernel::{DimRef, Ident};
+use cubtera_store::{LegacyUnitStateRow, SqliteStore, Store as _};
 
 #[derive(Subcommand)]
 pub enum StateCommands {
@@ -69,12 +78,33 @@ pub enum StateCommands {
     },
 }
 
+/// Validate `org`/`unit`/`dims`/`ext` and build the canonical state-key
+/// string used to look up (or delete) a [`LegacyUnitStateRow`].
+fn state_key(
+    org: &str,
+    unit: &str,
+    dimensions: &[String],
+    extensions: &[String],
+) -> Result<String, Box<dyn std::error::Error>> {
+    Ident::parse(org).map_err(AppError::from)?;
+    Ident::parse(unit).map_err(AppError::from)?;
+    let dims: Vec<String> = dimensions
+        .iter()
+        .map(|d| DimRef::parse(d).map(|r| r.key()).map_err(AppError::from))
+        .collect::<Result<_, _>>()?;
+    let ext: Vec<String> = extensions
+        .iter()
+        .map(|e| DimRef::parse(e).map(|r| r.key()).map_err(AppError::from))
+        .collect::<Result<_, _>>()?;
+    Ok(LegacyUnitStateRow::state_key(org, unit, &dims, &ext))
+}
+
 pub async fn run(
     config: &Config,
     ctx: &Ctx,
     cmd: StateCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let repos = Repositories::from_config(config).await?;
+    let store = SqliteStore::open(&config.store_path)?;
 
     match cmd {
         StateCommands::Get {
@@ -82,12 +112,11 @@ pub async fn run(
             dimensions,
             extensions,
         } => {
-            let key = UnitStateKey::try_new(&config.org, &unit, dimensions, extensions)?;
-            let record = repos
-                .unit_state
-                .get(&key)
+            let key = state_key(&config.org, &unit, &dimensions, &extensions)?;
+            let record = store
+                .get_legacy_unit_state(&key)
                 .await?
-                .ok_or_else(|| AppError::not_found("unit state", key.canonical()))?;
+                .ok_or_else(|| AppError::not_found("unit state", key.clone()))?;
 
             if ctx.json {
                 println!("{}", serde_json::to_string_pretty(&record)?);
@@ -105,7 +134,6 @@ pub async fn run(
 
         StateCommands::Ls { unit: _, stale } if stale => {
             let org = cubtera_kernel::Ident::parse(&config.org)?;
-            let store = cubtera_store::SqliteStore::open(&config.store_path)?;
             let stale_consumers = store.list_stale_consumers(&org).await?;
 
             if ctx.json {
@@ -127,12 +155,9 @@ pub async fn run(
 
         StateCommands::Ls { unit, .. } => {
             let unit = unit.ok_or("--unit is required unless --stale is set")?;
-            // `list` uses `org`/`unit` as raw SQL query parameters with no
-            // further checks - validate here, same as `Get`/`Rm`'s
-            // `UnitStateKey::try_new`.
-            cubtera_kernel::Ident::parse(&config.org)?;
-            cubtera_kernel::Ident::parse(&unit)?;
-            let records = repos.unit_state.list(&config.org, &unit).await?;
+            Ident::parse(&config.org)?;
+            Ident::parse(&unit)?;
+            let records = store.list_legacy_unit_state(&config.org, &unit).await?;
 
             if ctx.json {
                 println!("{}", serde_json::to_string_pretty(&records)?);
@@ -161,13 +186,13 @@ pub async fn run(
             dimensions,
             extensions,
         } => {
-            let key = UnitStateKey::try_new(&config.org, &unit, dimensions, extensions)?;
-            repos.unit_state.delete(&key).await?;
+            let key = state_key(&config.org, &unit, &dimensions, &extensions)?;
+            store.delete_legacy_unit_state(&key).await?;
 
             if ctx.json {
-                println!("{}", serde_json::json!({"deleted": key.canonical()}));
+                println!("{}", serde_json::json!({"deleted": key}));
             } else {
-                println!("Deleted state for {}", key.canonical());
+                println!("Deleted state for {key}");
             }
         }
     }

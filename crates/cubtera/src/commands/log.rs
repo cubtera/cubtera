@@ -1,9 +1,16 @@
-//! Log commands
+//! `cubtera log get` - v3-native read of the deployment log
+//! (`cubtera_store::LegacyDeploymentLogRow`, the same SQLite table v2's
+//! `DeploymentLogRepository`/`cubtera run` write to via
+//! `SqliteStore::append_legacy_deployment_log`) - no `cubtera-core`/
+//! `cubtera-persistence` dependency in this module. Query matching
+//! (`LegacyDeploymentLogRow::matches`) is a straight port of v2's
+//! `entry_matches`, kept next to the row type in `cubtera-store` so the
+//! two can't drift on what a query actually matches.
 
 use super::Ctx;
 use clap::Subcommand;
 use cubtera_config::Config;
-use cubtera_persistence::Repositories;
+use cubtera_store::SqliteStore;
 use std::collections::HashMap;
 
 #[derive(Subcommand)]
@@ -28,30 +35,30 @@ pub async fn run(
     ctx: &Ctx,
     cmd: LogCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let repos = Repositories::from_config(config).await?;
-
     match cmd {
         LogCommands::Get { query, limit } => {
             let query = parse_query(&query)?;
-            let entries = repos
-                .deployment_log
-                .find(&config.org, &query, Some(limit))
-                .await?;
+            let store = SqliteStore::open(&config.store_path)?;
+            let mut rows = store.find_legacy_deployment_log(&config.org).await?;
+            rows.retain(|row| row.matches(&query));
+            // Newest first, matching v2's `DeploymentLogRepository::find` contract.
+            rows.sort_by_key(|row| std::cmp::Reverse(row.timestamp));
+            rows.truncate(limit);
 
             if ctx.json {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-            } else if entries.is_empty() {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else if rows.is_empty() {
                 println!("No deployment log entries found for org '{}'", config.org);
             } else {
-                for entry in &entries {
+                for row in &rows {
                     println!(
                         "{}  {:<8}  {}  {}  exit={}  {}ms",
-                        format_timestamp(entry.timestamp),
-                        entry.command,
-                        entry.unit_name,
-                        entry.dimensions.join(","),
-                        entry.exit_code,
-                        entry.duration_ms,
+                        format_timestamp(row.timestamp),
+                        row.command,
+                        row.unit_name,
+                        row.dimensions.join(","),
+                        row.exit_code,
+                        row.duration_ms,
                     );
                 }
             }
