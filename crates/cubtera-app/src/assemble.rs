@@ -181,15 +181,26 @@ impl AssembleUseCase {
 
     /// List every known unit name for `org` - delegates to `UnitPort`.
     pub async fn list_units(&self, org: &str) -> AppResult<Vec<String>> {
+        Ident::parse(org)?;
         self.units.list_units(org).await
     }
 
     /// Fetch `unit_name`'s manifest without resolving any dimensions.
+    ///
+    /// `org` and `unit_name` are validated through [`Ident::parse`] before
+    /// they reach `UnitPort` - `FsUnitPort::find_unit_dir` joins
+    /// `unit_name` straight onto `units_path` with no validation of its
+    /// own (same "adapters are dumb" rationale as `ResolveUseCase::list_types`'s
+    /// doc comment), so an unvalidated `unit_name = "../../etc"` would
+    /// otherwise be a read primitive for any file named `manifest.toml`
+    /// outside `units_path`.
     pub async fn get_manifest(
         &self,
         org: &str,
         unit_name: &str,
     ) -> AppResult<cubtera_model::Manifest> {
+        Ident::parse(org)?;
+        Ident::parse(unit_name)?;
         self.units
             .find_manifest(org, unit_name)
             .await?

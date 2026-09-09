@@ -16,5 +16,6 @@ tokio = { workspace = true, features = ["fs", "rt"] }
 tracing.workspace = true
 
 [dev-dependencies]
+cubtera-kernel.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

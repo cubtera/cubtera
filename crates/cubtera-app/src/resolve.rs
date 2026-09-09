@@ -14,6 +14,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct ResolveUseCase {
     inventory: Arc<dyn InventoryPort>,
 }
@@ -28,6 +29,7 @@ impl ResolveUseCase {
     /// `meta.parent`). Returns [`AppError::NotFound`] if `name` doesn't
     /// exist for `dim_type`.
     pub async fn resolve(&self, org: &str, dim_type: &Ident, name: &Ident) -> AppResult<Dimension> {
+        Ident::parse(org)?;
         let key = DimRef::new(dim_type.clone(), name.clone());
         self.resolve_inner(org, key.clone(), Vec::new())
             .await?
@@ -44,18 +46,36 @@ impl ResolveUseCase {
         dim_type: &Ident,
         name: &Ident,
     ) -> AppResult<Option<Dimension>> {
+        Ident::parse(org)?;
         let key = DimRef::new(dim_type.clone(), name.clone());
         self.resolve_inner(org, key, Vec::new()).await
     }
 
     /// List every dimension name of `dim_type`.
     pub async fn list_names(&self, org: &str, dim_type: &Ident) -> AppResult<Vec<String>> {
+        Ident::parse(org)?;
         self.inventory.list_names(org, dim_type.as_str()).await
     }
 
     /// List every dimension type declared for `org` - a directory listing
     /// (`cubtera im get-types`/`GET /v1/{org}/dim-types`).
+    ///
+    /// `org` is validated through [`Ident::parse`] before it ever reaches
+    /// `InventoryPort` - every public method on this use case does the
+    /// same, since `org` (unlike `dim_type`/`name`, which every caller
+    /// already wraps in an `Ident` before calling in) otherwise arrives
+    /// here as a raw, caller-controlled `&str` (a REST path segment, in
+    /// `cubtera-server`'s case) with nothing upstream of this guaranteeing
+    /// it isn't `"../../etc"` - `FsInventoryPort::dim_type_dir` joins it
+    /// onto `inventory_path` with no validation of its own (adapters are
+    /// deliberately "dumb", see `AGENTS.md`). This is the v3 fix for
+    /// exactly the same bug class `cubtera-kernel` was built to close in
+    /// `dim_type`/`name`/`unit_name` - `org` was the one caller-controlled
+    /// segment that slipped through P0-P7 unvalidated. See
+    /// `crates/cubtera-inventory/tests/adversarial.rs` /
+    /// `crates/cubtera-app/tests/adversarial.rs`.
     pub async fn list_types(&self, org: &str) -> AppResult<Vec<String>> {
+        Ident::parse(org)?;
         self.inventory.list_types(org).await
     }
 
@@ -71,6 +91,7 @@ impl ResolveUseCase {
     /// are per-type, not per-instance, so there is no `meta.parent` to
     /// follow.
     pub async fn get_defaults(&self, org: &str, dim_type: &Ident) -> AppResult<Option<Dimension>> {
+        Ident::parse(org)?;
         let defaults = self
             .inventory
             .get_raw_defaults(org, dim_type.as_str())
@@ -90,6 +111,7 @@ impl ResolveUseCase {
     /// section), if one is defined - a direct passthrough, schemas have
     /// no gap-fill/parent-chain concept of their own.
     pub async fn get_schema(&self, org: &str, dim_type: &Ident) -> AppResult<Option<Value>> {
+        Ident::parse(org)?;
         self.inventory.get_raw_schema(org, dim_type.as_str()).await
     }
 
@@ -103,6 +125,7 @@ impl ResolveUseCase {
         dim_type: &Ident,
         name: &Ident,
     ) -> AppResult<Option<Dimension>> {
+        Ident::parse(org)?;
         let dim = match self.try_resolve(org, dim_type, name).await? {
             Some(dim) => dim,
             None => return Ok(None),
@@ -129,6 +152,7 @@ impl ResolveUseCase {
         dim_type: &Ident,
         name: &Ident,
     ) -> AppResult<Vec<Dimension>> {
+        Ident::parse(org)?;
         let Some(child_type) = child_type_of(dim_relations, dim_type.as_str()) else {
             return Ok(Vec::new());
         };
