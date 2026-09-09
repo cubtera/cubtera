@@ -8,6 +8,7 @@ use crate::error::AppResult;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Raw, adapter-supplied sections for one dimension record - deliberately
 /// "dumb" like v2's `cubtera_domain::RawDimension`: no gap-fill, no parent
@@ -140,10 +141,24 @@ pub struct ExecCapabilities {
     pub needs_identity: bool,
 }
 
+/// Live sink for a running process's combined stdout+stderr, invoked with
+/// each chunk as it's produced - the "instead of reading a finished
+/// artifact after completion" half of P7's log-streaming requirement
+/// (`docs/specs/2026-09-03-cubtera-v3-architecture.md`'s "P7 Server").
+/// `cubtera-app` never depends on `cubtera-exec`/HTTP directly (the
+/// dependency rule in AGENTS.md), so this is a bare closure type rather
+/// than a named trait shared across crates: `cubtera-server`'s
+/// `ServerExecutor` forwards the exact same `Arc<dyn Fn(&[u8]) + Send +
+/// Sync>` straight into `cubtera_exec::CapturingProcessRunner::
+/// exec_captured_streaming`, no adapter needed since the closure shape is
+/// identical on both sides. The CLI's bridge (which inherits stdio
+/// directly into the terminal, never captures it at all) never sets one.
+pub type LogSink = dyn Fn(&[u8]) + Send + Sync;
+
 /// What `RunUseCase` asks an `Executor` to do: run `command` against
 /// `instance`'s workspace with `variables` exposed however the runner
 /// exposes dimension-derived data (`TF_VAR_*`, `CUBTERA_IN_*`, ...).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ExecRequest {
     pub instance: cubtera_kernel::InstanceId,
     pub runner_type: String,
@@ -154,6 +169,23 @@ pub struct ExecRequest {
     /// Ask the runner to also gather+normalize this run's outputs (only
     /// meaningful when `capabilities().collects_outputs`).
     pub collect_outputs: bool,
+    /// See [`LogSink`]. `None` for every plan/CLI run.
+    pub log_sink: Option<Arc<LogSink>>,
+}
+
+impl std::fmt::Debug for ExecRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecRequest")
+            .field("instance", &self.instance)
+            .field("runner_type", &self.runner_type)
+            .field("command", &self.command)
+            .field("auto_approve", &self.auto_approve)
+            .field("variables", &self.variables)
+            .field("requested_version", &self.requested_version)
+            .field("collect_outputs", &self.collect_outputs)
+            .field("log_sink", &self.log_sink.is_some())
+            .finish()
+    }
 }
 
 /// What actually happened, reported back to `RunUseCase` for `Run`

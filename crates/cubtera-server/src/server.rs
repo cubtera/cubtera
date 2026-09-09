@@ -1,5 +1,6 @@
 //! Server setup.
 
+use crate::log_hub::LogHub;
 use crate::routes;
 use axum::Router;
 use cubtera_config::Config;
@@ -11,6 +12,9 @@ pub struct AppState {
     pub config: Config,
     /// `None` disables auth (local dev default) - see `crate::auth`.
     pub api_key: Option<String>,
+    /// Live log-broadcast channels for runs currently executing in the
+    /// background - see `crate::log_hub`'s doc comment (P7 log streaming).
+    pub log_hub: LogHub,
 }
 
 pub async fn run(addr: &str, config: Config) -> Result<(), Box<dyn std::error::Error>> {
@@ -22,6 +26,7 @@ pub async fn run(addr: &str, config: Config) -> Result<(), Box<dyn std::error::E
 
     let state = std::sync::Arc::new(AppState {
         api_key: config.api_key.clone(),
+        log_hub: LogHub::new(),
         config,
     });
 

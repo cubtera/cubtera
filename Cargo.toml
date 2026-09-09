@@ -71,6 +71,7 @@ clap = { version = "4", features = ["derive"] }
 axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.7", features = ["cors", "trace"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 
 # MCP
 rmcp = { version = "3", features = ["server", "macros", "transport-io", "schemars"] }

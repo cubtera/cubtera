@@ -58,6 +58,7 @@ fn v1_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/{org}/units/{unit}/apply", post(run::apply))
         .route("/{org}/runs/{run_id}", get(run::explain))
         .route("/{org}/runs/{run_id}/log", get(run::log))
+        .route("/{org}/runs/{run_id}/log/stream", get(run::log_stream))
         .route("/{org}/state", get(state::get))
         .route("/{org}/state/stale", get(state::stale))
         // Auth applies to every /v1 route but not /health, same as

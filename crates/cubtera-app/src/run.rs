@@ -20,7 +20,7 @@
 //! everything else raced.
 
 use crate::error::{AppError, AppResult};
-use crate::ports::{Clock, ExecRequest, Executor, IdentityProvider};
+use crate::ports::{Clock, ExecRequest, Executor, IdentityProvider, LogSink};
 use crate::resolve::ResolveUseCase;
 use cubtera_kernel::{Digest, Ident, InstanceId};
 use cubtera_model::{
@@ -84,6 +84,19 @@ pub struct ApplyRequest {
     pub inputs: Vec<InputRequest>,
 }
 
+/// Result of [`RunUseCase::queue_apply`]/[`RunUseCase::queue_apply_direct`]:
+/// a persisted [`RunStatus::Queued`] [`Run`] (`.run.id` is stable from
+/// here on) plus everything [`RunUseCase::run_and_finish`] needs to
+/// actually execute it. `resolution`/`variables` are private - callers
+/// outside this module only ever need `.run` (to report the `run_id`
+/// back), never the resolution internals.
+pub struct QueuedApply {
+    pub run: Run,
+    resolution: ResolutionManifest,
+    variables: BTreeMap<String, Value>,
+}
+
+#[derive(Clone)]
 pub struct RunUseCase {
     resolve: ResolveUseCase,
     source: Arc<dyn SourceRepo>,
@@ -309,6 +322,7 @@ impl RunUseCase {
                 variables,
                 requested_version: None,
                 collect_outputs: false,
+                log_sink: None,
             })
             .await?;
 
@@ -350,6 +364,61 @@ impl RunUseCase {
     /// run, record a [`Run`], and (if the manifest asked for it and the
     /// runner can) publish an [`OutputSet`].
     pub async fn apply(&self, plan_id: &PlanId, req: ApplyRequest) -> AppResult<Run> {
+        let queued = self.queue_apply(plan_id, &req).await?;
+        self.run_and_finish(queued, &req, None).await
+    }
+
+    /// `cubtera run`: resolve, execute, and record a [`Run`] directly,
+    /// with no [`Plan`] artifact and no pin-drift check. This is the v3
+    /// replacement for v2's unconditional "just run it" `cubtera run` -
+    /// `apply()`'s reviewed-plan gate (§7 of the architecture spec) is an
+    /// *additional*, opt-in workflow (`cubtera plan` + `cubtera apply
+    /// --plan`), not the only way to execute a unit. In particular this is
+    /// the only path available for runners that don't support plan
+    /// artifacts at all (bash/helm - `plan()` rejects those with
+    /// [`AppError::Validation`]), so `cubtera run` must never be
+    /// implemented as an unconditional `plan()` + `apply()` pair.
+    pub async fn apply_direct(&self, instance: InstanceId, req: ApplyRequest) -> AppResult<Run> {
+        let queued = self.queue_apply_direct(instance, &req).await?;
+        self.run_and_finish(queued, &req, None).await
+    }
+
+    /// Phase 1 of [`Self::apply_direct`]: resolve, mint, and persist a
+    /// [`RunStatus::Queued`] [`Run`] row - everything that must happen
+    /// before a caller can safely hand the `run_id` back to *its* own
+    /// caller. Split out (rather than inlined into `apply_direct`) so
+    /// `cubtera-server` can do exactly that: respond to `POST .../apply`
+    /// with the queued `Run` immediately, then run [`Self::run_and_finish`]
+    /// in a background task it spawns itself (this crate has no async
+    /// runtime dependency of its own to spawn one internally - see
+    /// AGENTS.md's dependency rule), so a client can open a live
+    /// `GET .../runs/{id}/log/stream` against the right id before the run
+    /// finishes instead of only ever being able to fetch a finished
+    /// artifact (P7's "live log streaming" requirement).
+    pub async fn queue_apply_direct(
+        &self,
+        instance: InstanceId,
+        req: &ApplyRequest,
+    ) -> AppResult<QueuedApply> {
+        let now = self.clock.now_unix_ms();
+        let (mut current, variables) = self
+            .build_resolution(&instance, req.config_digest, &req.inputs)
+            .await?;
+        current.runner_version = self
+            .executor
+            .resolve_runner_version(&req.runner_type, None)
+            .await?;
+        self.queue_run(instance, None, current, variables, req, now)
+            .await
+    }
+
+    /// Phase 1 of [`Self::apply`] - same split as [`Self::queue_apply_direct`],
+    /// but going through a stored [`Plan`]'s expiry/pin checks first.
+    pub async fn queue_apply(
+        &self,
+        plan_id: &PlanId,
+        req: &ApplyRequest,
+    ) -> AppResult<QueuedApply> {
         let plan = self
             .store
             .get_plan(plan_id)
@@ -377,66 +446,75 @@ impl RunUseCase {
             )));
         }
 
-        self.execute_and_record(
+        self.queue_run(
             plan.instance.clone(),
             Some(plan_id.clone()),
             current,
             variables,
-            &req,
+            req,
             now,
         )
         .await
     }
 
-    /// `cubtera run`: resolve, execute, and record a [`Run`] directly,
-    /// with no [`Plan`] artifact and no pin-drift check. This is the v3
-    /// replacement for v2's unconditional "just run it" `cubtera run` -
-    /// `apply()`'s reviewed-plan gate (§7 of the architecture spec) is an
-    /// *additional*, opt-in workflow (`cubtera plan` + `cubtera apply
-    /// --plan`), not the only way to execute a unit. In particular this is
-    /// the only path available for runners that don't support plan
-    /// artifacts at all (bash/helm - `plan()` rejects those with
-    /// [`AppError::Validation`]), so `cubtera run` must never be
-    /// implemented as an unconditional `plan()` + `apply()` pair.
-    pub async fn apply_direct(&self, instance: InstanceId, req: ApplyRequest) -> AppResult<Run> {
-        let now = self.clock.now_unix_ms();
-        let (mut current, variables) = self
-            .build_resolution(&instance, req.config_digest, &req.inputs)
-            .await?;
-        current.runner_version = self
-            .executor
-            .resolve_runner_version(&req.runner_type, None)
-            .await?;
-        self.execute_and_record(instance, None, current, variables, &req, now)
-            .await
-    }
-
-    /// Shared tail of [`Self::apply`]/[`Self::apply_direct`]: record a
-    /// queued [`Run`], take a lease, execute, and persist the outcome
-    /// (status/exit code/published outputs/logs/instance bookkeeping/
-    /// consumed-input tracking) - everything downstream of "we have an
-    /// agreed-upon `ResolutionManifest` and variables to run with",
-    /// regardless of whether that agreement came from a stored [`Plan`]
-    /// or was computed fresh for this call.
-    async fn execute_and_record(
+    /// Mint and persist a [`RunStatus::Queued`] [`Run`] row, bundled with
+    /// the [`ResolutionManifest`]/variables [`Self::run_and_finish`] needs
+    /// to actually execute it.
+    async fn queue_run(
         &self,
         instance: InstanceId,
         plan_ref: Option<PlanId>,
-        current: ResolutionManifest,
+        resolution: ResolutionManifest,
         variables: BTreeMap<String, Value>,
         req: &ApplyRequest,
         now: i64,
-    ) -> AppResult<Run> {
+    ) -> AppResult<QueuedApply> {
         let op = run_op_for(&req.command);
         let run = Run::queued(
             RunId::new(self.mint_id(&instance, "run", now)),
-            instance.clone(),
-            op.clone(),
+            instance,
+            op,
             req.actor.clone(),
             now,
         );
-        let mut run = Run { plan_ref, ..run };
+        let run = Run { plan_ref, ..run };
         self.store.append_run(&run).await?;
+        Ok(QueuedApply {
+            run,
+            resolution,
+            variables,
+        })
+    }
+
+    /// Phase 2 of [`Self::apply`]/[`Self::apply_direct`]: take a lease,
+    /// execute, and persist the outcome (status/exit code/published
+    /// outputs/logs/instance bookkeeping/consumed-input tracking) -
+    /// everything downstream of "we have an agreed-upon
+    /// `ResolutionManifest` and variables to run with, and a `Run` row
+    /// already exists for it". `sink`, if given, receives every chunk of
+    /// the run's live output as [`Executor::execute`] produces it (see
+    /// [`crate::ports::LogSink`]) - `cubtera-server` is the only caller
+    /// that ever sets one; both `apply`/`apply_direct` (synchronous, used
+    /// by the CLI, which inherits stdio directly and has nothing to
+    /// forward) pass `None`.
+    ///
+    /// Public (not just `pub(crate)`) so `cubtera-server` can call this
+    /// itself from inside a `tokio::spawn`ed task after getting a
+    /// [`QueuedApply`] back from [`Self::queue_apply_direct`]/
+    /// [`Self::queue_apply`] - see those methods' doc comments.
+    pub async fn run_and_finish(
+        &self,
+        queued: QueuedApply,
+        req: &ApplyRequest,
+        sink: Option<Arc<LogSink>>,
+    ) -> AppResult<Run> {
+        let QueuedApply {
+            mut run,
+            resolution: current,
+            variables,
+        } = queued;
+        let instance = run.instance.clone();
+        let op = run.op.clone();
 
         let caps = self.executor.capabilities(&req.runner_type).await?;
         let want_outputs = req.publish_outputs && caps.collects_outputs && op.publishes();
@@ -455,12 +533,35 @@ impl RunUseCase {
                 variables,
                 requested_version: None,
                 collect_outputs: want_outputs,
+                log_sink: sink,
             })
             .await;
         // Best-effort release: a run that failed to even acquire/execute
         // must not wedge the instance for every subsequent apply.
         let _ = self.store.release_lease(lease).await;
-        let outcome = exec_result?;
+        let outcome = match exec_result {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                // Best-effort: mark the row `Failed` instead of leaving it
+                // stuck at `Queued` forever. Matters more now than it did
+                // for the old, always-synchronous `execute_and_record`:
+                // an async caller (`cubtera-server`, spawning
+                // `run_and_finish` in the background) never gets to see
+                // this `Err` itself to react to it.
+                let _ = self
+                    .store
+                    .update_run(
+                        &run.id,
+                        RunPatch {
+                            status: Some(RunStatus::Failed),
+                            finished_at: Some(self.clock.now_unix_ms()),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+                return Err(e);
+            }
+        };
 
         let mut patch = RunPatch {
             status: Some(if outcome.success {
@@ -739,6 +840,10 @@ mod tests {
         }
 
         async fn execute(&self, req: ExecRequest) -> AppResult<ExecOutcome> {
+            if let Some(sink) = &req.log_sink {
+                sink(b"fake output line 1\n");
+                sink(b"fake output line 2\n");
+            }
             Ok(ExecOutcome {
                 exit_code: if self.fail { 1 } else { 0 },
                 success: !self.fail,
@@ -983,6 +1088,64 @@ mod tests {
 
         assert_eq!(run.status, RunStatus::Failed);
         assert_ne!(run.exit_code, Some(0));
+    }
+
+    /// P7's log-streaming split: `queue_apply_direct` must hand back a
+    /// `Queued` `Run` (with a real, usable `id`) *before* the run has
+    /// actually executed, and `run_and_finish`'s `sink` must see every
+    /// chunk `Executor::execute` produces - this is what lets
+    /// `cubtera-server` respond to `POST .../apply` immediately and let a
+    /// client tail `GET .../runs/{id}/log/stream` while `run_and_finish`
+    /// keeps running in the background.
+    #[tokio::test]
+    async fn queue_then_run_and_finish_matches_apply_direct_and_streams_to_the_sink() {
+        let (_tmp, source) = unit_source("echo hi").await;
+        let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+        let uc = use_case(
+            source,
+            store.clone(),
+            FakeExecutor::ok(),
+            SeqClock::new(1000, 1000),
+        );
+
+        let req = ApplyRequest {
+            runner_type: "bash".into(),
+            command: vec!["apply".into()],
+            auto_approve: true,
+            actor: Ident::parse("ci").unwrap(),
+            config_digest: Digest::of(b"cfg"),
+            publish_outputs: false,
+            outputs_schema_version: semver::Version::parse("1.0.0").unwrap(),
+            lease_ttl: Duration::from_secs(60),
+            inputs: vec![],
+        };
+
+        let queued = uc.queue_apply_direct(instance(), &req).await.unwrap();
+        // The `Run` row exists and is queued *before* anything executes -
+        // exactly the "hand the id back early" property the split exists
+        // for.
+        assert_eq!(queued.run.status, RunStatus::Queued);
+        let queued_id = queued.run.id.clone();
+        assert_eq!(
+            uc.explain(&queued_id).await.unwrap().status,
+            RunStatus::Queued
+        );
+
+        let received: Arc<std::sync::Mutex<Vec<Vec<u8>>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink_received = received.clone();
+        let sink: Arc<LogSink> = Arc::new(move |chunk: &[u8]| {
+            sink_received.lock().unwrap().push(chunk.to_vec());
+        });
+
+        let run = uc.run_and_finish(queued, &req, Some(sink)).await.unwrap();
+        assert_eq!(run.id, queued_id);
+        assert_eq!(run.status, RunStatus::Succeeded);
+
+        let chunks = received.lock().unwrap();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], b"fake output line 1\n");
+        assert_eq!(chunks[1], b"fake output line 2\n");
     }
 
     #[tokio::test]

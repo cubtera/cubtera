@@ -100,9 +100,13 @@ impl Executor for ServerExecutor {
         )
         .with_args(args)
         .with_env(env);
+        // `req.log_sink` and `cubtera_exec::CapturingProcessRunner`'s sink
+        // are literally the same underlying type
+        // (`Arc<dyn Fn(&[u8]) + Send + Sync>`) - no adapter needed, see
+        // `cubtera_app::ports::LogSink`'s doc comment.
         let (output, log_bytes) = self
             .process
-            .exec_captured(&spec)
+            .exec_captured_streaming(&spec, req.log_sink.clone())
             .await
             .map_err(exec_error)?;
 

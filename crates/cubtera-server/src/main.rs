@@ -6,6 +6,7 @@
 mod auth;
 mod error;
 mod exec_bridge;
+mod log_hub;
 mod policy;
 mod routes;
 mod run_support;
