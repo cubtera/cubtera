@@ -4,7 +4,17 @@
 # Cubtera
 ## Multi-dimensional Infrastructure Manager
 
-Cubtera is a powerful CLI tool designed for managing multi-layer and multi-dimensional infrastructure deployments. It provides a flexible framework for organizing and executing infrastructure code across different dimensions like environments, regions, and accounts.
+Cubtera is an instance-centric CLI and server for running the same Terraform,
+OpenTofu, Bash, or Helm code across many "dimensions" (environments, data
+centers, accounts, services, ...) without duplicating the unit's code per
+target. It adds a reviewable plan/apply gate, a durable run ledger, a
+cross-unit output mesh, and drift/fleet reporting on top of that - see
+[Architecture](#architecture) below.
+
+> This is a v3 rewrite. If you have an existing `config.toml`/data
+> directory from an older release (keys like `deploymentLogPath`,
+> `unitStatePath`, `[deploymentLog]`, `[unitState]`, or `CUBTERA_DB`), run
+> `cubtera migrate` once - see [Migration](#migration).
 
 ## Installation
 
@@ -17,132 +27,239 @@ brew install cubtera
 ### Manual Installation
 Download the latest binary from [releases](https://github.com/cubtera/cubtera/releases) and add it to your PATH.
 
+### Building from source
+```bash
+cargo build --workspace --release
+# binaries land in target/release/: cubtera, cubtera-server, cubtera-mcp
+```
+
 ## Core Concepts
 
 ### Dimensions
-Dimensions are logical groupings that help organize your infrastructure. Common dimension types could represent:
+Dimensions are logical groupings that help organize your infrastructure.
+Common dimension types include:
 
 - **Environments** (dev, staging, prod)
-- **DataBaese** (us-east-1, eu-west-1)
+- **Data centers / regions** (us-east-1, eu-west-1)
 - **Accounts** (management, production, staging)
-- **Applications** (frontend, backend, database)
-- **Custom dimensions** (storage, domains, repos, etc.)
+- **Services** (frontend, backend, database)
+- Any custom type you define (storage, domains, repos, ...)
 
-Dimensions can be hierarchical (parent-child relationships) or flat.
+Dimensions are hierarchical, resolved through a configured `dimRelations`
+chain (default `["dome", "env", "dc"]`):
+
+```
+dome:prod
+  └── env:prod
+      └── dc:prod-use1
+```
+
+Each dimension is a plain JSON file on disk under `inventory/<type>/`, with
+optional `.default` (gap-fill) and `.schema` (JSON Schema validation) files
+per type - see `example/inventory` for a working layout.
 
 ### Units
-Units are atomic operational components that represent infrastructure tasks. A unit can be:
+Units are atomic infrastructure operations. A unit can be:
 
-- Terraform/OpenTofu modules
-- Bash scripts
-- Helm charts
-- Other IaC tools
+- Terraform or OpenTofu modules (`type = "tf"` / `"tofu"`)
+- A Bash script (`type = "bash"`)
+- A Helm chart (`type = "helm"`)
 
-Each unit is defined with a manifest that specifies:
-- Required dimensions
-- Runner type (tf, bash, etc.)
-- Environment variables
-- State configuration
+Each unit lives under `units/<name>/` with a `manifest.toml` describing its
+required/optional dimensions, access rules, runner overrides, and (for
+units that need to share data with each other) `[inputs]`/`[outputs]`.
 
-Example manifest.toml:
+Example `manifest.toml`:
 ```toml
-dimensions = ["env", "region"]
+dimensions = ["dc"]
+allowList = ["dc:stg1-use2"]   # allowList/denyList entries are always "type:name"
 type = "tf"
-overwrite = false
+
+[spec.files.optional]
+"greeting.txt" = "greeting.txt"
 
 [runner]
-version = "1.5.0"
-state_backend = "s3"
+version = "1.6.6"
+state_backend = "local"
 
-[spec.envVars.required]
-AWS_ACCESS_KEY_ID = "AWS_ACCESS_KEY_ID"
-AWS_SECRET_ACCESS_KEY = "AWS_SECRET_ACCESS_KEY"
+# Publish `terraform output -json` for other units to read via [inputs]
+[outputs]
+publish = true
 ```
+
+A consumer unit reads it back:
+```toml
+[inputs.infra]
+unit = "tf_unit02"   # dims/ext auto-projected from this unit's own resolved dimensions
+required = false
+```
+
+See `example/units/tf_unit02` (producer) and `example/units/bash_unit01`
+(consumer) for the full working pair.
 
 ### Features
 
-- **Multi-dimensional Management**: Run the same IaC code with different dimension values
-- **Multiple Runners**: Support for Terraform, OpenTofu, and Bash
-- **State Management**: Flexible state backend configuration
-- **Deployment Logging**: Track deployments with BOM (Bill of Materials)
-- **Inventory API**: MongoDB-backed API for querying infrastructure state
-- **Docker Support**: Container image for API service
-- **CI/CD Integration**: GitHub Actions support
+- **Multi-dimensional runs** - the same unit code, driven by `-d type:name`
+  flags, across as many dimension combinations as your inventory defines.
+- **Terraform / OpenTofu / Bash / Helm runners**, each expressed as a
+  `RunnerStrategy` - adding a new one doesn't touch the run pipeline.
+- **Reviewable plan → apply** for `tf`/`tofu`: `cubtera plan` freezes a
+  `Plan` (module/inventory/config digests + a rendered artifact); `cubtera
+  apply --plan <id>` re-checks those pins before touching real
+  infrastructure and refuses if anything drifted.
+- **Durable run ledger** (SQLite): every `Plan`/`Run`/`Instance` is a row,
+  queryable with `cubtera explain run <id>`.
+- **Cross-unit output mesh**: a producer's `terraform output` becomes a
+  versioned `OutputSet` other units can declare as `[inputs]`, with
+  built-in staleness tracking - no DAG, no auto-run of the producer.
+- **Fleet visibility & drift**: `cubtera fleet ls`/`status` and `cubtera
+  drift` diff a unit + a selector expression over the inventory against
+  what's actually been applied, for CI gating.
+- **A server + REST API + MCP server**: `cubtera-server` exposes the same
+  inventory/run/state operations over HTTP (with live SSE log streaming
+  for in-flight applies); `cubtera-mcp` exposes the read-only subset as
+  MCP tools for IDEs/agents.
 
 ## Usage
 
-### Basic Commands
+### Basic commands
 
-1. Run a unit with specific dimensions:
+Run a unit directly (no plan artifact - the "just do it" path, and the
+only path for `bash`/`helm` units):
 ```bash
-cubtera run -d env:prod -d region:us-east-1 -u network -- plan
+cubtera run -u network -d env:prod -d dc:prod-use1 -- apply
 ```
 
-2. Query dimension data:
+Reviewed plan → apply, for `tf`/`tofu` units:
 ```bash
-cubtera im getAll env
+cubtera plan -u network -d dc:prod-use1 -- plan
+# -> prints a plan id
+cubtera apply --plan <plan_id> -u network -d dc:prod-use1 -- apply
 ```
 
-3. View deployment logs:
+Query the inventory:
 ```bash
-cubtera log get -q unit_name:network -l 10
+cubtera im get-all env
+cubtera im get env prod
+```
+
+Fleet visibility and drift:
+```bash
+cubtera fleet ls
+cubtera fleet status -u network -s "env.name == 'prod'"
+cubtera drift -u network -s "env.name == 'prod'"   # CI: exits non-zero on real drift
+```
+
+Look up a past run, or the deployment log:
+```bash
+cubtera explain run <run_id>
+cubtera log get -q unit:network --limit 10
+```
+
+Run the server and the MCP server against it:
+```bash
+CUBTERA_CONFIG=example/config.toml cubtera-server &
+cubtera-mcp --server-url http://127.0.0.1:8081
 ```
 
 ### Configuration
 
-Configure Cubtera using either:
-- Environment variables (CUBTERA_*)
-- Configuration file (~/.cubtera/config.toml)
+Configure Cubtera with a `config.toml` (default search path
+`~/.cubtera/config.toml`, override with `--config`/`CUBTERA_CONFIG`) plus a
+handful of `CUBTERA_*` environment variables (`CUBTERA_ORG`,
+`CUBTERA_API_KEY`, `CUBTERA_SERVER_ADDR`, `CUBTERA_SERVER_URL`).
 
-Example config.toml:
+Example `config.toml`:
 ```toml
-org = "mycompany"
-workspace_path = "~/.cubtera/workspace"
-inventory_path = "~/.cubtera/inventory"
+[default]
+inventoryPath = "inventory"
+unitsPath = "units"
+modulesPath = "modules"
+storePath = "~/.cubtera/store.sqlite"   # SQLite: instances, plans, runs, output sets, leases
+dimRelations = ["dome", "env", "dc"]
+orgs = ["mycompany"]
 
-[runner.tf]
-version = "1.5.0"
+[mycompany.runner.tf]
+version = "1.6.6"
 state_backend = "s3"
 
-[state.s3]
+[mycompany.state.s3]
 bucket = "terraform-state"
 region = "us-east-1"
-key = "states/{{org}}/{{unit_name}}"
+key = "{{dim_tree}}/{{unit_name}}.tfstate"
 ```
+
+See `example/config.toml` for a fully-annotated reference and
+[AGENTS.md](AGENTS.md#configuration) for the full field list.
+
+### Migration
+
+Upgrading from a pre-v3 install (fs-jsonl deployment logs, fs-json unit
+state, `[deploymentLog]`/`[unitState]`/`CUBTERA_DB` in `config.toml`)?
+
+```bash
+cubtera migrate                 # dry run - prints what would change
+cubtera migrate --apply         # cleans up config.toml (backed up first) and imports history into storePath
+```
+
+See [`.github/docs/migration-guide.md`](.github/docs/migration-guide.md).
 
 ## Architecture
 
-Cubtera consists of several core components:
+Cubtera is layered kernel → model → application → infrastructure →
+interface, with dependencies pointing inward only:
 
-1. **Runner System**: Executes infrastructure code using different runners (Terraform, Bash)
-2. **Dimension Management**: Handles dimension data and relationships
-3. **Inventory Management**: Stores and retrieves infrastructure state
-4. **Deployment Logging**: Tracks deployment history and metadata
-5. **API Server**: Provides HTTP access to inventory data
+1. **`cubtera-kernel`** - zero-I/O identifiers (`Ident`, `DimRef`,
+   `InstanceId`, `Digest`) that close path-traversal/injection holes at a
+   single choke point.
+2. **`cubtera-model`** - pure domain types: dimensions, units, manifests,
+   access policy, selectors/bindings, plans, runs, output sets.
+3. **`cubtera-app`** - use cases (`ResolveUseCase`, `AssembleUseCase`,
+   `ValidateUseCase`, `RunUseCase`, `BindingUseCase`) behind ports
+   (`InventoryPort`, `UnitPort`, `Executor`, `IdentityProvider`, `Clock`).
+4. **Adapters** - `cubtera-inventory` (filesystem), `cubtera-store`
+   (SQLite), `cubtera-exec` (Terraform/OpenTofu/Bash/Helm runners),
+   `cubtera-identity`, `cubtera-source`, `cubtera-config`.
+5. **Interfaces** - the `cubtera` CLI, the `cubtera-server` REST API +
+   SSE log streaming, and `cubtera-mcp` (an MCP server that's a pure HTTP
+   client of `cubtera-server`).
+
+For the full crate map, on-disk formats, and REST/MCP surface, see
+[AGENTS.md](AGENTS.md); for the original design intent, see
+[`docs/specs/2026-09-03-cubtera-v3-architecture.md`](docs/specs/2026-09-03-cubtera-v3-architecture.md).
 
 ## Development
 
-### Project Structure
+### Project structure
 ```
 cubtera/
-├── src/
-│   ├── core/           # Core functionality
-│   │   ├── runner/     # Runner implementations
-│   │   ├── dim/        # Dimension management
-│   │   ├── dlog/       # Deployment logging
-│   │   └── unit/       # Unit management
-│   ├── bin/            # CLI and API binaries
-│   └── utils/          # Helper functions
+├── crates/
+│   ├── cubtera-kernel/      # Ident/DimRef/InstanceId/Digest - zero I/O
+│   ├── cubtera-model/       # pure domain types
+│   ├── cubtera-app/         # ports + use cases
+│   ├── cubtera-inventory/   # filesystem inventory/unit adapters
+│   ├── cubtera-store/       # SQLite Store (instances/plans/runs/output sets/leases)
+│   ├── cubtera-exec/        # tf/tofu/bash/helm runners + process execution
+│   ├── cubtera-identity/    # secret resolution (env:/literal: refs)
+│   ├── cubtera-source/      # module pinning/resolution (git/fs)
+│   ├── cubtera-config/      # config.toml loader
+│   ├── cubtera/             # CLI binary
+│   ├── cubtera-server/      # REST API + SSE log streaming binary
+│   └── cubtera-mcp/         # MCP server binary (HTTP client of cubtera-server)
+├── example/                 # config.toml, inventory/, units/ - used by e2e/golden tests and local dev
+└── docs/specs/              # architecture spec(s)
 ```
 
 ### Building
 ```bash
-cargo build --release
+cargo build --workspace
 ```
 
 ### Testing
 ```bash
-cargo test
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check
 ```
 
 ## Contributing

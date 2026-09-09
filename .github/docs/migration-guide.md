@@ -1,185 +1,160 @@
-# Migrating from Cubtera v1 to v2
+# Migrating to Cubtera v3
 
-v2 (`v2-rewrite`) is a breaking major release: new `config.toml` schema, new
-CLI flags/subcommand names, new REST API shape. There is no compatibility
-shim - this guide is the closest thing to one. The legacy v1 source lives at
-[`v1/`](../../v1/) for reference during migration; it will be removed once
-v2 reaches feature parity with wave 2.
+v3 is a breaking release on top of the previous (v2-shaped) codebase: a
+single SQLite `Store` (`storePath`) replaces the old three-way
+deployment-log/unit-state backend choice (fs-jsonl, fs-json, MongoDB), and
+`cubtera-server` replaces the old split `cubtera-api` (read-only) + `cubtera
+run` (execution) with one binary that does both, plus a reviewable
+`plan`/`apply` pipeline and cross-unit output mesh that didn't exist
+before. There is no compatibility shim - old `config.toml` keys are
+silently ignored, not translated - so run `cubtera migrate` once to bring
+an existing install forward.
 
-The one thing that **has not** changed is the on-disk inventory format
-(`{type}/{name}{sep}{section}.json`, `.default`/`.schema` records, gap-fill
-defaults, parent chains). If your `inventory/` directory works with v1, it
-works with v2 unmodified - see [`AGENTS.md`](../../AGENTS.md#inventory-on-disk-format)
-for the exact rules.
+The one thing that **has not** changed, ever, across any of these
+rewrites: the on-disk inventory format
+(`{type}/{name}{sep}{section}.json`, `.default`/`.schema` records,
+gap-fill defaults, parent chains). If your `inventory/` directory works
+today, it works with v3 unmodified - see
+[AGENTS.md](../../AGENTS.md#inventory-on-disk-format) for the exact rules.
+`units/*/manifest.toml`'s schema is also unchanged (same field names,
+same `type:name` access-list convention) - see [unit.md](unit.md).
 
-## Config file
+## Step 1: run `cubtera migrate`
 
-v1 read `~/.cubtera/config.toml` (or `$CUBTERA_CONFIG`) with a flat
-`[default]`/`[<org>]` table structure and separate `CUBTERA_*` env var
-overrides for nearly every field. v2 keeps the `[default]` + per-org table
-shape but the field set changed:
+```bash
+# Dry run first - reports what it would do, writes nothing
+cubtera migrate --dlog-path ~/.cubtera/dlog --unit-state-path ~/.cubtera/state
 
-| v1 field | v2 field | Notes |
+# Then actually do it
+cubtera migrate --dlog-path ~/.cubtera/dlog --unit-state-path ~/.cubtera/state --apply
+```
+
+`--dlog-path`/`--unit-state-path` should point at whatever your old
+`deploymentLogPath`/`unitStatePath` config values were (defaults were
+`~/.cubtera/dlog`/`~/.cubtera/state`) - omit either flag to skip importing
+that data source. Without `--apply`, the command only prints a report;
+nothing is written until you pass it.
+
+What it does:
+
+- **`config.toml` cleanup**: finds now-dead keys (`deploymentLogPath`,
+  `unitStatePath`, `[deploymentLog]`, `[unitState]`) in every org table,
+  backs up the original file to `config.toml.bak`, removes those keys,
+  and makes `storePath` explicit in `[default]`. If a MongoDB-based
+  install used `CUBTERA_DB` for the inventory backend, note that this env
+  var (and Mongo support generally) is gone entirely in v3 - there's
+  nothing to migrate there, since `InventoryPort` only has a filesystem
+  implementation now; re-point `inventoryPath` at an exported filesystem
+  copy of your inventory if you relied on `CUBTERA_DB` for that.
+- **Deployment log import**: reads `{dlog-path}/{org}.jsonl` (one JSON
+  object per line, the old fs-jsonl format) and appends each entry into
+  the SQLite store's `legacy_deployment_log` table - the same table
+  `cubtera log get` reads. **Append-only**, matching the old backend's own
+  semantics - re-running against a store that already has this data will
+  duplicate rows, so migrate once per store.
+- **Unit state import**: walks `{unit-state-path}/{org}/{unit}/{dims...}/
+  {ext...}/outputs.json` (the old fs-json layout) and upserts each into
+  `legacy_unit_state` - the same table `cubtera state get/ls/rm` reads.
+  **Idempotent** (keyed by org+unit+dims+ext), safe to re-run.
+- Unparseable lines/files are reported and skipped, never a hard failure
+  for the whole migration.
+
+This only backfills the **legacy** tables `cubtera log`/`cubtera state`
+read - it does not (and can't) synthesize `Plan`/`Run`/`OutputSet` rows for
+the new v3 pipeline, since those are new concepts with no pre-v3 on-disk
+equivalent. Your deployment history is preserved for querying; your first
+`plan`/`apply`/`run` on each unit after migrating starts a fresh v3
+history for it.
+
+## Step 2: update `config.toml`
+
+If you ran `cubtera migrate --apply`, this already happened for you.
+Otherwise, by hand:
+
+| Old key | v3 replacement | Notes |
 | --- | --- | --- |
-| `workspace_path` | *(removed)* | v2 has no single workspace root; set `inventoryPath`/`unitsPath`/`modulesPath`/`pluginsPath` independently. |
-| `inventory_path` | `inventoryPath` | camelCase preferred; `inventory_path` still accepted as an alias. |
-| `units_path` | `unitsPath` | same alias behavior. |
-| `modules_path` | `modulesPath` | |
-| `plugins_path` | `pluginsPath` | |
-| `temp_folder_path` | `tempFolderPath` | |
-| `org` | *(removed from file)* | set via `CUBTERA_ORG` env var or `--config`'s `orgs` list (first entry is the default). |
-| `orgs` (colon-separated string) | `orgs` (TOML array) | `orgs = ["cubtera", "teracub"]`, not `"cubtera:teracub"`. |
-| `dim_relations` (colon-separated string) | `dimRelations` (TOML array) | same array-instead-of-colon-string change. |
-| `db` (MongoDB URL) | *(still env-var only)* `CUBTERA_DB` | Selects the `InventoryRepository` backend (Mongo vs FS); requires a build with `cubtera-persistence`'s `mongodb` feature (the default for the `cubtera`/`cubtera-api` binaries). |
-| `dlog_db` | `[deploymentLog]` (`connectionString`/`database`/`collection`) | Selects `MongoDeploymentLogRepository`; unset means the fs-jsonl backend (`deploymentLogPath`, default `~/.cubtera/dlog`). |
-| *(new)* | `unitStatePath` / `[unitState]` (`connectionString`/`database`/`collection`) | Cross-unit `[outputs]`/`[inputs]` state exchange (see "Unit manifests" below) has no v1 equivalent. `[unitState]` selects `MongoUnitStateRepository`; unset means the fs-json backend (`unitStatePath`, default `~/.cubtera/state`). |
-| `dlog_job_*_env` | *(not ported)* | v1's per-CI-provider job-env autodetection for dlog metadata isn't carried over; deployment log entries record `command`/`exit_code`/`duration_ms`/`dimensions` but not CI job context. |
-| `clean_cache`, `always_copy_files` | `cleanCache`, `alwaysCopyFiles` | unchanged semantics. |
-| `file_name_separator` | `fileNameSeparator` | unchanged semantics, default `:`. |
-| `[runner.<type>]` / `[state.<backend>]` | same shape | still arbitrary `HashMap<String, String>` per runner type/state backend; merged entry-by-entry between `[default]` and the org table, not replaced wholesale. |
-| *(new)* | `apiKey` / `CUBTERA_API_KEY` | required for `cubtera-api` auth (v1's `ApiKey` guard existed but was never actually applied to a route). |
+| `deploymentLogPath` | *(removed)* | history now lives in `storePath`'s `legacy_deployment_log` table |
+| `[deploymentLog]` (Mongo connection) | *(removed)* | Mongo support is gone; there is no database-backed deployment log anymore |
+| `unitStatePath` | *(removed)* | history now lives in `storePath`'s `legacy_unit_state` table |
+| `[unitState]` (Mongo connection) | *(removed)* | same - Mongo is gone |
+| `CUBTERA_DB` | *(removed)* | `InventoryPort` is filesystem-only in v3, no runtime backend switch |
+| *(new)* | `storePath` | SQLite file backing `Instance`/`Plan`/`Run`/`OutputSet`/leases *and* the legacy dlog/unit-state tables - default `~/.cubtera/store.sqlite` |
 
-`CUBTERA_<FIELD>` env var overrides still work, but the field names follow
-the new camelCase/snake_case-alias set above, and array fields are real env
-var lists (`CUBTERA_ORGS=cubtera,teracub` still parses as a list - the file
-format is what changed, not the env var convention).
+Everything else (`inventoryPath`, `unitsPath`, `modulesPath`,
+`pluginsPath`, `tempFolderPath`, `dimRelations`, `orgs`,
+`fileNameSeparator`, `alwaysCopyFiles`, `cleanCache`, `[runner.<type>]`,
+`[state.<backend>]`) is unchanged. See [config.md](config.md) for the full
+current schema and `example/config.toml` for a working reference.
 
-See `example/config.toml` for a fully-annotated v2 example.
+## Step 3: know what's new (and what changed shape)
 
-## CLI
+### New CLI surface
 
-Binary name is unchanged (`cubtera`), but subcommand/flag names changed:
+| Command | Purpose |
+| --- | --- |
+| `cubtera validate` | fleet-wide JSON Schema + dim-graph + `[outputs]`/runner-capability validation (was `im validate`, one dimension at a time) |
+| `cubtera fleet ls`/`status` | list every resolvable dimension; diff a `Binding` (unit + selector) against `Store` |
+| `cubtera plan` / `cubtera apply --plan` | reviewable plan artifact (tf/tofu only) with pin-drift checking before a real apply |
+| `cubtera explain run <run_id>` | look up one `Run` record |
+| `cubtera drift` | CI-facing: `fleet status`, filtered to drift only, with a dedicated exit code |
+| `cubtera migrate` | this migration itself |
 
-| v1 | v2 | Notes |
-| --- | --- | --- |
-| `cubtera run -u <unit> -d <dim> [-e <ext>] [-c <context>] -- <cmd>` | `cubtera run -u <unit> -d <dim> [-e <ext>] [--auto-approve] [--dry-run] -- <cmd>` | `-c/--context` (v1's loosely-defined "advanced feature") is gone; `--dry-run` is new (prints the `MaterializationPlan` without touching disk); `--auto-approve` is now an explicit flag instead of being inferred. |
-| `cubtera tf ...` (alias for `run`) | *(removed)* | use `cubtera run` directly. |
-| `cubtera im getAll <type>` | `cubtera im get-all <type>` | kebab-case subcommands throughout. |
-| `cubtera im getAllData <type>` | *(removed - use `get-all` + `get`)* | v1's "list of names" and "list of full data" were separate v1 calls; v2's `im get-all` lists names, `im get <type> <name>` returns full data for one. |
-| `cubtera im getByName <type> <name> [-c <context>]` | `cubtera im get <type> <name>` | `-c/--context` removed along with the rest of the "context" feature. |
-| `cubtera im getByParent <type> <name>` | `cubtera im get-children <type> <name>` | renamed for clarity. |
-| `cubtera im getParent <type> <name>` | `cubtera im get-parent <type> <name>` | |
-| `cubtera im getDefaults <type>` | `cubtera im get-defaults <type>` | |
-| `cubtera im getOrgs` | *(removed - use `cubtera config` or `GET /v1/orgs`)* | |
-| *(new)* | `cubtera im get-types <org>` | lists dimension types under an org (v1's FS mode had a known bug here - returned `orgs` instead of types; not carried over). |
-| *(new)* | `cubtera im get-schema <type>` | fetches `.schema:meta.json` for a type. |
-| `cubtera im validate <type> <name>` (stub, printed "not implemented") | `cubtera im validate <type> <name>` | now actually validates: checks existence, then runs the dimension's `meta` section against `.schema:meta.json` if one exists. |
-| `cubtera im syncDefaults <type>` | `cubtera im sync-defaults <type>` | Same behavior: reads FS defaults, writes to MongoDB (`CUBTERA_DB` must be set). |
-| `cubtera im syncAll <type> [-c <context>]` | `cubtera im sync-all <type>` | `-c/--context` removed along with the rest of the "context" feature. |
-| `cubtera im sync <type> <name> [-c <context>]` | `cubtera im sync <type> <name>` | |
-| `cubtera im deleteContext <context>` | *(removed)* | deliberately not ported - see "What's gone for good". |
-| `cubtera config` | `cubtera config [--json]` | `--json` prints the raw `Config` struct; without it, output is a human-readable summary. |
-| `cubtera log get -q <k:v> [--limit N]` | unchanged shape | now backed by a real `DeploymentLogRepository` (fs-jsonl by default, Mongo if `[deploymentLog]` is set) instead of being a stub. |
-| *(new)* | `cubtera state get/ls/rm -u <unit> [-d <type:name>...] [-e <type:name>...]` | no v1 equivalent - reads/deletes a producer's published `[outputs]` for an exact `dims`/`ext` key (see "Unit manifests" below). |
-
-Global flags: `--config <path>` (was env-var-only in v1's typical flow, now
-also a proper `-c/--config` CLI flag), `--log-level`, and the new `--json`
-for machine-readable output on `config`/`im`.
+`cubtera run`, `cubtera im *`, `cubtera log get`, `cubtera state
+get/ls/rm` all still exist with the same flags as before - `cubtera run`
+is now explicitly the "no plan artifact, no pin-drift gate" escape hatch
+(and the only path for `bash`/`helm` units, which have no plan concept at
+all).
 
 ### Exit codes
 
-v1 used `std::process::exit(0)` for access-denied and returned `1` for
-essentially every other failure via `unwrap_or_exit`. v2 maps `AppError`
-variants to distinct exit codes (`crates/cubtera/src/error.rs`):
+`EXIT_DRIFT_DETECTED = 7` is new (`cubtera drift` only, when real drift is
+found - not a failure signal for anything else). `EXIT_GENERAL_ERROR=1`,
+`EXIT_ACCESS_DENIED=3`, `EXIT_NOT_FOUND=4`, `EXIT_VALIDATION=5`,
+`EXIT_CONFIG=6` are unchanged.
 
-| Code | Meaning |
-| --- | --- |
-| `0` | success |
-| `1` | general/unclassified error |
-| `3` | access denied (`allowList`/`denyList`/`affinityTags`) - **not** `0` like v1 |
-| `4` | not found |
-| `5` | validation error (including `im validate` schema failures) |
-| `6` | configuration error |
-| *(runner's own code)* | once the pipeline reaches `execute`, the underlying `terraform`/`tofu`/`bash` exit code is propagated as-is |
+### REST API
 
-If any script depended on v1's "access denied = exit 0", it needs updating -
-that behavior was called out in the migration plan as something we
-deliberately do not carry forward (`exit(0)` meaning "denied" is
-indistinguishable from success to any caller).
+`cubtera-api` (read-only) is gone - `cubtera-server` now serves everything
+under one binary, including `plan`/`apply` (async, with SSE log streaming)
+and the new `validate`/`fleet/status`/`state`/`state/stale` routes. See
+[api.md](api.md) for the full v3 route list; `GET /v1/{org}/units/{name}/
+state` (v2's unit-state route) has no direct v3 equivalent - the closest
+is `GET /v1/{org}/state?unit=...` over the new `OutputSet` table (a
+different, revision-stamped shape - see [api.md](api.md#cross-unit-output-mesh)).
 
-## Unit manifests
+### MCP server
 
-- `allowList`/`denyList` entries must now be `type:name` (e.g. `"dome:mgmt"`,
-  `"env:stg1"`) rather than a bare dimension name. v1's access check compared
-  against bare names; v2's `AccessPolicy::evaluate` matches against the full
-  resolved `key_path` (`type:name` strings), so update any existing
-  manifests - a bare `"mgmt"` will silently deny every run in v2.
-- `spec.tf_version` is dropped (was already deprecated in v1); use
-  `[runner] version = "..."` instead.
-- Everything else in `manifest.toml` (`dimensions`, `optDims`, `type`,
-  `affinityTags`, `spec.files.{required,optional}`,
-  `spec.envVars.{required,optional}`, `[runner]`, `[state]`) is unchanged in
-  shape.
-- `type = "helm"` is now a supported runner (ported from `test2`'s helm
-  runner prototype): if the unit directory has a `values.yaml.tpl`, it's
-  rendered with handlebars against the merged `cubtera_*.json` dimension
-  data and written to `values.yaml` before `helm <command...>` runs. Not a
-  v1/`main` feature - new in v2 wave 2.
-- `[outputs] publish = true` and `[inputs.<alias>]` are new in v2, with no
-  v1 equivalent: a unit can publish its `apply`/`destroy` outputs
-  (`terraform`/`tofu output -json`, flattened) for another unit to consume
-  as `cubtera_in_<alias>.json`/`CUBTERA_IN_<ALIAS>`, keyed by projecting the
-  consumer's own resolved dimensions onto the producer's required ones - no
-  DAG, no auto-run of the producer, no cross-dimension guessing. See
-  [`AGENTS.md`](../../AGENTS.md#cross-unit-state-inputsoutputs) and
-  `example/units/tf_unit02`/`bash_unit01` for a worked example.
+`cubtera-mcp` no longer links `cubtera-app`/`cubtera-inventory`/
+`cubtera-store` directly - it's a pure HTTP client of a running
+`cubtera-server` (`--server-url`/`CUBTERA_SERVER_URL`, `--api-key`/
+`CUBTERA_API_KEY`). You must run `cubtera-server` for `cubtera-mcp` to
+work at all now; it can no longer read the inventory standalone.
 
-## REST API
+### Unit manifests
 
-- Auth is now actually enforced: set `CUBTERA_API_KEY` and send it as the
-  `x-api-key` header on every `/v1/*` request. v1 defined an `ApiKey` guard
-  but never attached it to a route - **v1's API was unauthenticated
-  regardless of configuration.**
-- No more `{status, id, data}` envelope and no more query-string routing
-  (`/v1/{org}/dim?type=&name=`). Routes are now REST-shaped path segments
-  (`/v1/{org}/dims/{dim_type}/{name}`) and responses are the resource
-  itself.
-- Errors are `application/problem+json` (RFC 7807) instead of ad-hoc JSON
-  bodies with varying shapes.
-- v1's API only worked against a MongoDB-backed inventory ("API feature
-  works only with DB storage"). v2's API works against the FS adapter too
-  (through the same `App`/services the CLI uses) - MongoDB support for the
-  API is wave 2, additive, not a prerequisite.
-- New unit endpoints (`GET /v1/{org}/units`, `GET /v1/{org}/units/{name}`)
-  didn't exist in v1's API at all.
-- `GET /v1/{org}/dlog` replaces v1's (Mongo-only) dlog query surface - see
-  [`api.md`](api.md#deployment-log). Filters are `q=key:value,...` instead
-  of repeated query params, since axum's query deserializer can't collect
-  repeated keys into a list.
-- `GET /v1/{org}/units/{name}/state` is entirely new (no v1 equivalent) -
-  see [`api.md`](api.md#units).
+Unchanged in shape from before - `allowList`/`denyList` still `type:name`,
+`[outputs] publish = true`/`[inputs.<alias>]` still work the same way.
+New: `cubtera validate` now catches a `publish = true` unit whose runner
+can't actually collect outputs (`bash`/`helm` without a hand-rolled
+`cubtera_outputs.json` via `outlet_command`) *before* you find out the
+hard way after an `apply`.
 
-See [`.github/docs/api.md`](api.md) for the full v2 endpoint reference.
+## What's gone for good
 
-## What's gone for good (not "not yet ported")
+- **MongoDB**, everywhere it used to be optional (`InventoryPort`,
+  deployment log, unit state). There is no `--features mongodb` in this
+  workspace and no `CUBTERA_DB`/`[deploymentLog]`/`[unitState]` config.
+- **`cubtera-api`** as a separate binary/crate - folded into
+  `cubtera-server`.
+- The old `cubtera-domain`/`cubtera-core`/`cubtera-persistence`/
+  `cubtera-runners` crates and the `v1/` reference directory - all
+  deleted from the repository.
 
-These are intentional removals, not gaps to fill in later - see the
-migration plan's "что осознанно не переносим из v1":
+## Full architecture reference
 
-- `GLOBAL_CFG` / any process-wide static config, and `exit()`/`unwrap_or_exit`
-  as control flow in business logic.
-- The `{status, id, data}` response envelope and query-param REST style.
-- Unconditional copying of plugins into `$HOME/.terraform.d/plugins` -
-  it's opt-in via config now, not a silent side effect.
-- `deleteContext` (scanned every Mongo database) and the `{data: ...}`
-  wrapper around stored defaults.
-- `spec.tf_version` and the legacy `tf_state_s3*` config fields.
-- Postgres as a storage backend option (it was a dead branch in v1's
-  `StorageBackend` enum with no real implementation).
-
-## Wave 2 (done)
-
-Everything planned for wave 2 has landed: MongoDB inventory adapter,
-`DeploymentLogRepository` fs-jsonl + Mongo with a working `cubtera log get`
-and `GET /v1/{org}/dlog`, `im sync-defaults`/`im sync-all`/`im sync`, a Helm
-runner, and `cubtera-mcp` - a real MCP server (via the `rmcp` SDK, stdio
-transport), not the REST-prototype approach explored on `test1`. It exposes
-read-only inventory/unit/deployment-log queries as MCP tools; it does not
-expose a `run` tool, so it cannot apply infrastructure changes on its own.
-
-On top of that, wave 2 also added a cross-unit state mesh with no v1
-equivalent: `UnitStateRepository` (fs-json default, `MongoUnitStateRepository`
-opt-in), `[outputs] publish = true` / `[inputs.<alias>]` in `manifest.toml`,
-`cubtera state get/ls/rm`, `GET /v1/{org}/units/{name}/state`, and the MCP
-`get_unit_state` tool - see [`AGENTS.md`](../../AGENTS.md#cross-unit-state-inputsoutputs)
-for how the producer/consumer key projection works.
+See [AGENTS.md](../../AGENTS.md) for the complete crate map, on-disk
+formats, plan/apply pipeline, and cross-unit output mesh design; see
+[`docs/specs/2026-09-03-cubtera-v3-architecture.md`](../../docs/specs/2026-09-03-cubtera-v3-architecture.md)
+for the original design intent (note: several details there are
+simplified or diverge slightly from what's actually implemented - AGENTS.md
+tracks the real implementation).
