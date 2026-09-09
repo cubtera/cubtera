@@ -71,6 +71,11 @@ enum Commands {
     /// Diff a `Binding` (unit + selector) against `Store`, reporting only
     /// drift - package changes or orphaned instances (v3, P5)
     Drift(commands::drift::DriftArgs),
+
+    /// Migrate a v1.x/v2 install onto v3: clean up dead `config.toml` keys
+    /// and import historical fs-jsonl/fs-json dlog/unit-state data into the
+    /// SQLite store (v3, P7)
+    Migrate(commands::migrate::MigrateArgs),
 }
 
 #[tokio::main]
@@ -95,7 +100,29 @@ async fn main() {
         eprintln!("Warning: failed to install tracing subscriber");
     }
 
-    // Load config
+    // Load config. `config_path` is the resolved file path (whether or not
+    // it actually exists yet) - `cubtera migrate` needs it to read/rewrite
+    // the raw TOML directly, mirroring `cubtera_config::Config::load`'s own
+    // `$CUBTERA_CONFIG`-or-`~/.cubtera/config.toml` resolution so the two
+    // never disagree on which file is "the" config.
+    let config_path = cli
+        .config
+        .clone()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var("CUBTERA_CONFIG")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| {
+                    std::env::var("HOME")
+                        .or_else(|_| std::env::var("USERPROFILE"))
+                        .map(|h| {
+                            std::path::PathBuf::from(h)
+                                .join(".cubtera")
+                                .join("config.toml")
+                        })
+                        .unwrap_or_else(|_| std::path::PathBuf::from("config.toml"))
+                })
+        });
     let config = match &cli.config {
         Some(path) => cubtera_config::Config::load_from_path(std::path::Path::new(path)),
         None => cubtera_config::Config::load(),
@@ -123,6 +150,7 @@ async fn main() {
         Commands::Apply(args) => commands::apply::run(&config, &ctx, args).await,
         Commands::Explain(cmd) => commands::explain::run(&config, &ctx, cmd).await,
         Commands::Drift(args) => commands::drift::run(&config, &ctx, args).await,
+        Commands::Migrate(args) => commands::migrate::run(&config, &ctx, &config_path, args).await,
     };
 
     if let Err(e) = result {

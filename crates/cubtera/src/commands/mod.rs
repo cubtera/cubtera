@@ -7,6 +7,7 @@ pub mod explain;
 pub mod fleet;
 pub mod im;
 pub mod log;
+pub mod migrate;
 pub mod plan;
 pub mod run;
 pub mod run_support;
