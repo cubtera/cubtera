@@ -3,10 +3,10 @@ on:
     branches:
       - main
       - v2-rewrite
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+    # Deliberately no `paths:` filter (v3, P7): golden/e2e tests assert
+    # against `example/**` fixtures (inventory, units, config.toml) without
+    # touching any `.rs`/`Cargo.toml` file, so a `paths:` filter here used
+    # to let fixture-only regressions merge untested.
 
 permissions:
     contents: write

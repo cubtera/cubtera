@@ -1,7 +1,16 @@
-# Cubtera v2 config schema: a `[default]` table plus one table per org
+# Cubtera v3 config schema: a `[default]` table plus one table per org
 # (matched by name), whose fields override `[default]`'s for that org.
 # All fields are optional; values shown here are the effective defaults
 # unless noted otherwise. Keys accept either camelCase or snake_case.
+#
+# If you're upgrading from a v1.x/v2 `config.toml` that still has
+# `deploymentLogPath`/`[deploymentLog]`/`unitStatePath`/`[unitState]` (or
+# `CUBTERA_DB`) in it: those keys are silently ignored by this loader (they
+# no longer map onto anything - MongoDB support was removed and the
+# fs-jsonl/fs-json backends were replaced by the single SQLite `storePath`
+# below). Run `cubtera migrate` to import their on-disk data into the new
+# store and get a cleaned-up `config.toml` - see
+# .github/docs/migration-guide.md.
 
 [default]
 inventoryPath = "example/inventory" # default => "inventory"
@@ -9,8 +18,7 @@ unitsPath = "example/units" # default => "units"
 modulesPath = "example/modules" # default => "modules"
 pluginsPath = "example/plugins" # default => "plugins"
 tempFolderPath = "example/.cubtera/tmp" # default => "~/.cubtera/temp"
-deploymentLogPath = "example/.cubtera/dlog" # default => "~/.cubtera/dlog" | fs-jsonl DeploymentLogRepository root, used unless [deploymentLog] below is set
-unitStatePath = "example/.cubtera/state" # default => "~/.cubtera/state" | fs-json UnitStateRepository root ({org}/{unit}/{dims}/{ext}/outputs.json), used unless [unitState] below is set
+storePath = "example/.cubtera/store.sqlite" # default => "~/.cubtera/store.sqlite" | SQLite Store: instances, plans, runs, output sets, leases, legacy dlog/unit-state tables
 
 dimRelations = ["dome", "env", "dc"] # default => ["dome", "env", "dc"]
 orgs = ["cubtera", "teracub"] # known orgs; first one is used when CUBTERA_ORG isn't set
@@ -49,20 +57,3 @@ outlet_command = "echo Outlet command" # runs after the runner finishes successf
 # BashRunner always executes the single `*.sh` file it finds in the unit's
 # temp folder - it ignores `runner_command`/`version`/`extra_args` entirely,
 # so there's no meaningful `[cubtera.runner.bash]` override to set here.
-
-# Uncomment to switch DeploymentLogRepository from fs-jsonl (deploymentLogPath
-# above) to MongoDB - all orgs share this database/collection, distinguished
-# by each entry's own "org" field.
-# [cubtera.deploymentLog]
-# connectionString = "mongodb://localhost:27017" # required
-# database = "cubtera" # default => "cubtera"
-# collection = "deployments" # default => "deployments"
-
-# Uncomment to switch UnitStateRepository (cross-unit [outputs]/[inputs]
-# state exchange) from fs-json (unitStatePath above) to MongoDB - all orgs
-# share this database/collection, distinguished by each entry's own "org"
-# field.
-# [cubtera.unitState]
-# connectionString = "mongodb://localhost:27017" # required
-# database = "cubtera" # default => "cubtera"
-# collection = "unit_state" # default => "unit_state"
