@@ -33,10 +33,7 @@ fn repo_root() -> PathBuf {
 /// running them against a shared store would race on that lease under
 /// `cargo test`'s default parallelism.
 fn shared_store_path() -> PathBuf {
-    tempfile::tempdir()
-        .unwrap()
-        .keep()
-        .join("store.sqlite")
+    tempfile::tempdir().unwrap().keep().join("store.sqlite")
 }
 
 /// A fresh, per-call SQLite store path - isolates a test's `cubtera`

@@ -24,10 +24,7 @@ fn cli(store_path: &Path) -> Command {
 }
 
 fn fresh_store_path() -> PathBuf {
-    tempfile::tempdir()
-        .unwrap()
-        .keep()
-        .join("store.sqlite")
+    tempfile::tempdir().unwrap().keep().join("store.sqlite")
 }
 
 async fn seed(store_path: &Path, unit: &str, dims: &[&str], outputs: serde_json::Value) {
