@@ -35,7 +35,7 @@ fn repo_root() -> PathBuf {
 fn shared_store_path() -> PathBuf {
     tempfile::tempdir()
         .unwrap()
-        .into_path()
+        .keep()
         .join("store.sqlite")
 }
 
@@ -73,7 +73,7 @@ fn cli(temp_path: &Path) -> Command {
 /// it only needs to outlive this test's `cubtera` invocations, and the OS
 /// temp dir is reaped independently of this test suite.
 fn fresh_temp_dir() -> PathBuf {
-    tempfile::tempdir().unwrap().into_path()
+    tempfile::tempdir().unwrap().keep()
 }
 
 /// Probe whether `name` is runnable on `PATH` (used to skip tofu/helm tests

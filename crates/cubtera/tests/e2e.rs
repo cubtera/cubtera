@@ -27,7 +27,7 @@ fn cli() -> Command {
     let temp_dir = tempfile::tempdir().unwrap();
     // Leak: the dir only needs to outlive this one process invocation, and
     // the OS temp dir gets reaped independently of this test suite.
-    let temp_path = temp_dir.into_path();
+    let temp_path = temp_dir.keep();
     // Every command eagerly opens the SQLite store (`Repositories::from_config`),
     // even `im get`/`config`, which never touch it - point it at an isolated
     // per-test path so tests never collide on (or depend on the existence

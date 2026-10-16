@@ -26,7 +26,7 @@ fn cli(store_path: &Path) -> Command {
 fn fresh_store_path() -> PathBuf {
     tempfile::tempdir()
         .unwrap()
-        .into_path()
+        .keep()
         .join("store.sqlite")
 }
 
