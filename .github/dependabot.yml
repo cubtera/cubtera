@@ -7,3 +7,9 @@ updates:
     commit-message:
       # Prefix all commit messages with "[docker] " (no colon, but a trailing whitespace)
       prefix: "fix(dependabot)"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "chore(deps)"

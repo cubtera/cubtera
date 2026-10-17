@@ -2,6 +2,7 @@ on:
   pull_request:
     branches:
       - main
+      - v3
       - v2-rewrite
     # Deliberately no `paths:` filter (v3, P7): golden/e2e tests assert
     # against `example/**` fixtures (inventory, units, config.toml) without
@@ -9,8 +10,7 @@ on:
     # to let fixture-only regressions merge untested.
 
 permissions:
-    contents: write
-    pull-requests: write
+    contents: read
 
 name: Code changes test
 jobs:
@@ -21,10 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The toolchain version and components come from rust-toolchain.toml,
+      # so CI and local builds use the same compiler.
       - name: Install toolchain
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --component clippy,rustfmt
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" show active-toolchain || "$HOME/.cargo/bin/rustup" toolchain install
 
       - name: Pre-build install dependencies
         run: |

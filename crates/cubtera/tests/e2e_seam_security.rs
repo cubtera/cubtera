@@ -26,7 +26,7 @@ fn repo_root() -> PathBuf {
 fn cli_with_temp() -> (Command, PathBuf) {
     let mut cmd = Command::cargo_bin("cubtera").unwrap();
     let temp_dir = tempfile::tempdir().unwrap();
-    let temp_path = temp_dir.into_path();
+    let temp_path = temp_dir.keep();
     cmd.current_dir(repo_root())
         .env("CUBTERA_TEMP_PATH", &temp_path)
         .env("CUBTERA_STORE_PATH", temp_path.join("store.sqlite"))
